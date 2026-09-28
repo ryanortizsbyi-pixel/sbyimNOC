@@ -1,0 +1,372 @@
+/**
+ * NOC Portal - Role-Based Authentication (RBAC) Module
+ * Handles user login states, Admin vs Guest permissions, session storage, and event dispatching.
+ */
+
+class AuthManager {
+  constructor() {
+    this.STORAGE_KEY = 'noc_portal_auth_user';
+    this._cachedUsers = null;
+    this.currentUser = this.loadUser();
+    this.refreshUsers();
+  }
+
+  /**
+   * Refresh in-memory users cache from database / local storage
+   */
+  async refreshUsers() {
+    try {
+      if (window.nocDB && window.nocDB.getUsers) {
+        const users = await window.nocDB.getUsers();
+        if (users && users.length > 0) {
+          this._cachedUsers = {};
+          for (const u of users) {
+            this._cachedUsers[u.username.toLowerCase()] = u;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Could not refresh users in AuthManager', e);
+    }
+  }
+
+  /**
+   * System accounts map (reads from dynamic cache or fallback defaults)
+   */
+  get systemUsers() {
+    if (this._cachedUsers && Object.keys(this._cachedUsers).length > 0) {
+      return this._cachedUsers;
+    }
+
+    try {
+      const stored = localStorage.getItem('noc_users_v2') || localStorage.getItem('noc_users_v1');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const map = {};
+          parsed.forEach(u => {
+            map[u.username.toLowerCase()] = u;
+          });
+          this._cachedUsers = map;
+          return map;
+        }
+      }
+    } catch (e) {}
+
+    return {
+      ryan: {
+        username: 'ryan',
+        password: 'spider06',
+        role: 'developer',
+        displayName: 'Ryan Ortiz (Developer)',
+        email: ''
+      },
+      sbyim: {
+        username: 'SBYIM',
+        password: 'NOC#2022#',
+        role: 'admin',
+        displayName: 'SBYI Management',
+        email: ''
+      },
+      security: {
+        username: 'security',
+        password: 'sec@2024',
+        role: 'security',
+        displayName: 'SBYIM Security Officer',
+        email: ''
+      },
+      employee01: {
+        username: 'Employee01',
+        password: '666666@',
+        role: 'employee',
+        displayName: 'Island Security',
+        email: ''
+      },
+      employee02: {
+        username: 'Employee02',
+        password: '777777#',
+        role: 'employee',
+        displayName: 'Inspire Integrated',
+        email: ''
+      },
+      '1gdl': {
+        username: '1GDL',
+        password: '55555',
+        role: 'guest',
+        displayName: 'Gulf Dunes Landscapping',
+        email: ''
+      }
+    };
+  }
+
+  /**
+   * Load saved session - returns null so the landing screen is always the first screen seen upon loading index
+   */
+  loadUser() {
+    // Always start unauthenticated upon loading the index so the welcome screen is the first screen seen
+    return null;
+  }
+
+  /**
+   * Check login credentials against registered user accounts
+   */
+  login(username, password, rememberMe = false) {
+    try {
+      sessionStorage.removeItem('noc_explicit_logout');
+    } catch (e) {}
+
+    const userKey = String(username || '').trim().toLowerCase();
+    const usersMap = this.systemUsers;
+    const user = usersMap[userKey];
+
+    if (user && user.password === password) {
+      let resolvedRole = user.role || 'guest';
+      let resolvedDisplayName = user.displayName || user.display_name || user.username;
+      if (userKey === 'sbyim') resolvedRole = 'admin';
+      if (userKey === 'security') resolvedRole = 'security';
+      if (userKey === 'ryan') {
+        resolvedRole = 'developer';
+        if (resolvedDisplayName === 'Ryan (System Administrator)' || resolvedDisplayName === 'System Administrator' || resolvedDisplayName === 'Ryan (Developer)') {
+          resolvedDisplayName = 'Ryan Ortiz (Developer)';
+        }
+      }
+
+      this.currentUser = {
+        username: user.username,
+        role: resolvedRole,
+        displayName: resolvedDisplayName,
+        email: user.email || '',
+        loggedInAt: new Date().toISOString(),
+        rememberMe: !!rememberMe
+      };
+      sessionStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.currentUser));
+      if (rememberMe) {
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.currentUser));
+        localStorage.setItem('noc_remembered_username', user.username);
+      } else {
+        localStorage.removeItem(this.STORAGE_KEY);
+        localStorage.removeItem('noc_remembered_username');
+      }
+      this.triggerAuthChange();
+      return { success: true, user: this.currentUser };
+    }
+
+    return {
+      success: false,
+      message: 'Invalid username or password. Please try again.'
+    };
+  }
+
+  /**
+   * Quick role switcher / direct login
+   */
+  switchRole(role) {
+    const u = this.systemUsers[role.toLowerCase()];
+    if (u) {
+      return this.login(u.username, u.password);
+    }
+    return { success: false, message: 'Invalid role specified.' };
+  }
+
+  /**
+   * Logout current user and reset back to unauthenticated state
+   */
+  logout() {
+    this.currentUser = null;
+    try {
+      sessionStorage.removeItem(this.STORAGE_KEY);
+      localStorage.removeItem(this.STORAGE_KEY);
+      localStorage.removeItem('noc_remembered_username');
+      sessionStorage.setItem('noc_explicit_logout', 'true');
+    } catch (e) {}
+    this.triggerAuthChange();
+  }
+
+  /**
+   * Check if user is currently authenticated
+   */
+  isLoggedIn() {
+    return this.currentUser !== null;
+  }
+
+  /**
+   * Get current authenticated user
+   */
+  getUser() {
+    return this.currentUser || { username: 'unauthenticated', role: 'none', displayName: 'Please Sign In' };
+  }
+
+  /**
+   * Role check helpers
+   */
+  isAdmin() {
+    if (!this.currentUser) return false;
+    const role = String(this.currentUser.role || '').toLowerCase();
+    const username = String(this.currentUser.username || '').toLowerCase();
+    return role === 'admin' || role === 'developer' || username === 'ryan' || username === 'sbyim' || username === 'admin';
+  }
+
+  isDeveloper() {
+    if (!this.currentUser) return false;
+    const role = String(this.currentUser.role || '').toLowerCase();
+    const username = String(this.currentUser.username || '').toLowerCase();
+    return role === 'developer' || username === 'ryan';
+  }
+
+  canBulkDelete() {
+    return this.isAdmin(); // Allow Admin and Developer to bulk delete / delete all records
+  }
+
+  canViewClient() {
+    return false; // Apply same table view (hide separate Client column, show Description of Work)
+  }
+
+  canViewNocType() {
+    return false; // Apply same table view (hide separate NOC Type column)
+  }
+
+  isSecurity() {
+    return this.currentUser && this.currentUser.role === 'security';
+  }
+
+  isEmployee() {
+    return Boolean(this.currentUser && (this.currentUser.role === 'employee' || this.currentUser.role === 'main'));
+  }
+
+  isMain() {
+    return this.isEmployee();
+  }
+
+  isGuest() {
+    return this.currentUser && this.currentUser.role === 'guest';
+  }
+
+  isLookupOnly() {
+    return Boolean(this.currentUser && (this.currentUser.role === 'guest' || this.currentUser.role === 'security' || this.currentUser.role === 'employee' || this.currentUser.role === 'main'));
+  }
+
+  isAdminUser() {
+    return Boolean(
+      this.currentUser &&
+      (this.currentUser.role === 'admin' ||
+       this.currentUser.role === 'developer' ||
+       this.currentUser.username?.toLowerCase() === 'ryan' ||
+       this.currentUser.username?.toLowerCase() === 'admin')
+    );
+  }
+
+  isSBYIM() {
+    return Boolean(
+      this.currentUser &&
+      this.currentUser.username &&
+      this.currentUser.username.toLowerCase() === 'sbyim'
+    );
+  }
+
+  canManageDatabase() {
+    return this.isAdmin(); // Allowed for 'ryan', 'admin', 'SBYIM', and 'developer'
+  }
+
+  canShowDatabaseBadge() {
+    if (this.isSBYIM()) return false;
+    return Boolean(
+      this.currentUser &&
+      (this.currentUser.role === 'admin' ||
+       this.currentUser.username?.toLowerCase() === 'ryan' ||
+       this.currentUser.username?.toLowerCase() === 'admin' ||
+       this.currentUser.role === 'developer')
+    );
+  }
+
+  canExportJSON() {
+    if (this.isSBYIM()) return false;
+    return Boolean(
+      this.currentUser &&
+      (this.currentUser.role === 'admin' ||
+       this.currentUser.username?.toLowerCase() === 'ryan' ||
+       this.currentUser.username?.toLowerCase() === 'admin' ||
+       this.currentUser.role === 'developer')
+    );
+  }
+
+  canImportJSON() {
+    return this.canExportJSON();
+  }
+
+  canManageGuidelinesAndDocs() {
+    if (!this.currentUser) return false;
+    const role = String(this.currentUser.role || '').toLowerCase();
+    const username = String(this.currentUser.username || '').toLowerCase();
+    return role === 'admin' || role === 'developer' || username === 'ryan' || username === 'sbyim' || username === 'admin';
+  }
+
+  canManageAiDocs() {
+    return this.isDeveloper(); // Strictly Developer access role only
+  }
+
+  canViewAiDocs() {
+    return this.isDeveloper(); // Strictly Developer access role only
+  }
+
+  canManageUsers() {
+    if (this.isSBYIM()) return false;
+    return Boolean(this.isAdminUser() || this.isDeveloper() || this.isAdmin()); // Admin and Developer can see and manage User Database
+  }
+
+  canAccessAiAssistant() {
+    return this.isDeveloper(); // Strictly Developer access role only
+  }
+
+  canViewCompanyCode() {
+    if (this.isSBYIM()) return false;
+    return Boolean(
+      this.currentUser &&
+      (this.currentUser.role === 'developer' ||
+       this.currentUser.username?.toLowerCase() === 'ryan' ||
+       this.currentUser.role === 'admin')
+    );
+  }
+
+  /**
+   * Capability permission checks
+   */
+  canCreate() {
+    return this.isAdmin();
+  }
+
+  canEdit() {
+    return this.isAdmin();
+  }
+
+  canDelete() {
+    return this.isAdmin() || this.isDeveloper();
+  }
+
+  canUpload() {
+    return this.isAdmin();
+  }
+
+  canDownload() {
+    return this.isAdmin(); // Only administrators can download NOC documents
+  }
+
+  canView() {
+    return this.isAdmin(); // Only administrators can view NOC documents
+  }
+
+  canViewDocuments() {
+    return this.isAdmin(); // Only administrators can view documents and actions
+  }
+
+  /**
+   * Dispatch auth state change event to update UI elements
+   */
+  triggerAuthChange() {
+    window.dispatchEvent(new CustomEvent('noc:auth-change', {
+      detail: { user: this.currentUser }
+    }));
+  }
+}
+
+// Global Auth instance
+window.nocAuth = new AuthManager();
