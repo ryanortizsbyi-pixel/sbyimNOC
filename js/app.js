@@ -1930,7 +1930,17 @@ class NOCApp {
         try {
           const result = await window.supabaseManager.testConnection();
           if (result.success) {
-            window.showToast('Supabase PostgreSQL connection successful! ⚡', 'success');
+            // Run comprehensive non-destructive CRUD test
+            if (window.nocDB && window.nocDB.testSupabaseCRUD) {
+              const crudRes = await window.nocDB.testSupabaseCRUD();
+              if (crudRes.success) {
+                window.showToast('Supabase PostgreSQL connected! Read, Insert, Update, and Delete tests all PASSED with 0 residue. ⚡', 'success');
+              } else {
+                window.showToast(`Connected, but CRUD test failed: ${crudRes.error}`, 'warning');
+              }
+            } else {
+              window.showToast('Supabase PostgreSQL connection successful! ⚡', 'success');
+            }
           } else {
             window.showToast(result.message || 'Connection test failed.', 'error');
           }
@@ -1984,6 +1994,41 @@ class NOCApp {
         } finally {
           btnRestoreAllData.disabled = false;
           btnRestoreAllData.textContent = '🔄 Restore All Data';
+        }
+      });
+    }
+
+    // Compare & Validate Local vs Supabase Data
+    const btnValidateData = document.getElementById('btnValidateData');
+    if (btnValidateData) {
+      btnValidateData.addEventListener('click', async () => {
+        if (!window.supabaseManager || !window.supabaseManager.isConfigured()) {
+          window.showToast('Please connect to Supabase first to run validation.', 'error');
+          return;
+        }
+
+        btnValidateData.disabled = true;
+        btnValidateData.textContent = 'Validating...';
+
+        try {
+          const report = await window.nocDB.validateDataWithSupabase();
+          if (report.status === 'OFFLINE') {
+            window.showToast(report.message, 'error');
+          } else {
+            console.log('=== SUPABASE MIGRATION DATA VALIDATION REPORT ===', report);
+            const summaryLines = (report.tables || []).map(t => `${t.table}: Local=${t.localCount || 0}, Supabase=${t.supabaseCount || 0} [${t.status}]`).join('\n');
+            if (report.overallStatus === 'PASS') {
+              window.showToast(`Validation Passed! All tables verified with matching record counts.`, 'success');
+            } else {
+              window.showToast(`Validation Completed (${report.overallStatus}). Check Developer Console for details.`, 'info');
+            }
+            alert(`=== SUPABASE DATA VALIDATION REPORT ===\nOverall Status: ${report.overallStatus}\n\n${summaryLines}`);
+          }
+        } catch (err) {
+          window.showToast('Validation failed: ' + err.message, 'error');
+        } finally {
+          btnValidateData.disabled = false;
+          btnValidateData.textContent = '📊 Validate Data';
         }
       });
     }

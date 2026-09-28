@@ -1,0 +1,103 @@
+{
+  "backupMetadata": {
+    "timestamp": "2026-09-28T21:45:37+04:00",
+    "description": "Full local database backup before Supabase PostgreSQL migration"
+  },
+  "customTypes": [
+    "Activity",
+    "Activity NOC",
+    "Berthing NOC",
+    "Construction Camp Site Approval",
+    "Construction Camp Size & Location Approval",
+    "Construction NOC",
+    "Design and Build NOC",
+    "Maintenance Activity",
+    "Maintenance NOC",
+    "Marine Survey NOC",
+    "O&M NOC",
+    "Operation & Maintenance NOC",
+    "Site Visit & Meeting",
+    "Temporary Occupancy Certificate"
+  ],
+  "customContractors": [
+    "ABU DHABI DISTRIBUTION COMPANY (ADDC)",
+    "ADVANCED TECHNICAL SERVICES (ATS)",
+    "AJB CONTRACTING LLC",
+    "AL JABER BUILDING LLC",
+    "AL JABER TRANSPORT & GENERAL CONTRACTING (AJB)",
+    "APEX ENERGY SERVICES LLC",
+    "APEX ENGINEERING & INFRASTRUCTURE LTD.",
+    "ARABIAN TECHNICAL CONSTRUCTION LLC (ATC)",
+    "ARABTEC CONSTRUCTION",
+    "DMTL CONTRACTING LLC",
+    "EMIRATES TECHNICAL SERVICES LLC (ETS)",
+    "EUROPEAN UTILITIES & DRAINAGE (EUD)",
+    "GULF DUNES LANDSCAPING (GDL)",
+    "IMPRESSIVE INTEGRATED MANAGEMENT (IIM)",
+    "ISLAND SECURITY SERVICES (ISS)",
+    "MASDAR SPECIALIZED TECHNICAL SERVICES O&M LLC (MSTS)",
+    "METROPOLITAN BUILDERS CORP.",
+    "NATIONAL MARINE DREDGING COMPANY (NMDC)",
+    "NETKOM COMMUNICATIONS TECHNOLOGY LLC (NCT)",
+    "PIONEER DEMOLITION SPECIALISTS LLC",
+    "PREMIER DEVELOPMENT SERVICES (PDS)",
+    "ROYAL GARDENS & LANDSCAPING LLC",
+    "SAFE EARTH SANITATION (SES)",
+    "SIX CONSTRUCT",
+    "SKYLINE ELECTROMECHANICAL SERVICES",
+    "TAQA INFRASTRUCTURE SERVICES",
+    "TRANS-GULF CONTRACTING CO."
+  ],
+  "users": [
+    {
+      "username": "ryan",
+      "password": "spider06",
+      "role": "developer",
+      "displayName": "Ryan Ortiz (Developer)",
+      "email": ""
+    },
+    {
+      "username": "SBYIM",
+      "password": "NOC#2022#",
+      "role": "admin",
+      "displayName": "SBYI Management",
+      "email": ""
+    },
+    {
+      "username": "security",
+      "password": "sec@2024",
+      "role": "security",
+      "displayName": "SBYIM Security Officer",
+      "email": ""
+    },
+    {
+      "username": "Employee01",
+      "password": "666666@",
+      "role": "employee",
+      "displayName": "Island Security",
+      "email": ""
+    },
+    {
+      "username": "Employee02",
+      "password": "777777#",
+      "role": "employee",
+      "displayName": "Inspire Integrated",
+      "email": ""
+    },
+    {
+      "username": "1GDL",
+      "password": "55555",
+      "role": "guest",
+      "displayName": "Gulf Dunes Landscapping",
+      "email": ""
+    }
+  ],
+  "settings": {
+    "noc_contractor_renames": {},
+    "portal_config": {
+      "autoSync": true,
+      "theme": "light"
+    }
+  },
+  "nocRecords": []
+}

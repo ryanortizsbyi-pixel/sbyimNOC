@@ -1,0 +1,46 @@
+{
+  "backupTimestamp": "2026-09-28T21:45:37+04:00",
+  "backupVersion": "1.0",
+  "sourceDatabase": {
+    "engine": "IndexedDB / Web Storage (localStorage)",
+    "databaseName": "NOC_Portal_DB",
+    "version": 3,
+    "stores": [
+      "noc_records",
+      "noc_documents",
+      "noc_requirements_docs",
+      "sbyi_coc_docs",
+      "ai_documents"
+    ],
+    "localStorageKeys": [
+      "noc_records_v1",
+      "noc_users_v2",
+      "noc_custom_types",
+      "noc_custom_contractors",
+      "noc_contractor_renames",
+      "noc_requirements_documents_v2",
+      "sbyi_coc_documents_v1",
+      "ai_documents_v1",
+      "noc_settings_portal_config"
+    ]
+  },
+  "targetDatabase": {
+    "engine": "PostgreSQL 14+ (Supabase)",
+    "tables": [
+      "noc_records",
+      "noc_requirements_docs",
+      "sbyi_coc_docs",
+      "ai_documents",
+      "noc_custom_types",
+      "noc_custom_contractors",
+      "noc_settings",
+      "noc_users"
+    ]
+  },
+  "backupFiles": [
+    "schema_backup.sql",
+    "seed_data_backup.json",
+    "seed_data_backup.sql",
+    "ROLLBACK_PROCEDURE.md"
+  ]
+}

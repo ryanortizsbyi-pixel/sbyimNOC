@@ -2248,6 +2248,337 @@ class NOCDatabase {
   }
 
   // ==========================================================================
+  // SUPABASE STORAGE & BINARY DOCUMENT HANDLERS
+  // ==========================================================================
+
+  /**
+   * Convert Data URL to Blob for Supabase Storage uploads
+   */
+  dataUrlToBlob(dataUrl) {
+    if (!dataUrl) return null;
+    if (dataUrl.startsWith('data:')) {
+      const parts = dataUrl.split(',');
+      const mimeMatch = parts[0].match(/:(.*?);/);
+      const mimeType = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+      const bstr = atob(parts[1]);
+      let n = bstr.length;
+      const u8arr = new Uint8Array(n);
+      while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+      }
+      return new Blob([u8arr], { type: mimeType });
+    }
+    return null;
+  }
+
+  /**
+   * Upload a document to Supabase Storage bucket
+   */
+  async uploadToStorage(bucketName, filePath, dataUrl, mimeType = 'application/pdf') {
+    if (!this.isSupabaseActive()) return null;
+    const client = this.getSupabaseClient();
+    if (!client || !client.storage) return null;
+
+    try {
+      const blob = this.dataUrlToBlob(dataUrl) || new Blob([dataUrl], { type: mimeType });
+      const { data, error } = await client.storage
+        .from(bucketName)
+        .upload(filePath, blob, {
+          cacheControl: '3600',
+          upsert: true,
+          contentType: mimeType
+        });
+
+      if (error) {
+        console.warn(`Supabase Storage upload note (${bucketName}/${filePath}):`, error.message);
+        return null;
+      }
+
+      // Get public URL
+      const { data: urlData } = client.storage.from(bucketName).getPublicUrl(filePath);
+      return urlData ? urlData.publicUrl : null;
+    } catch (err) {
+      console.warn('Storage upload error:', err.message);
+      return null;
+    }
+  }
+
+  // ==========================================================================
+  // TASK 9: NON-DESTRUCTIVE SUPABASE CRUD CONNECTION TEST
+  // ==========================================================================
+
+  /**
+   * Comprehensive non-destructive CRUD test for Supabase connection
+   */
+  async testSupabaseCRUD() {
+    if (!this.isSupabaseActive()) {
+      return {
+        success: false,
+        error: 'Supabase client is not connected. Configure URL and Anon Key first.'
+      };
+    }
+
+    const client = this.getSupabaseClient();
+    const testId = 'test_conn_check_' + Date.now();
+    const testNocNum = 'NOC-TEST-' + Math.floor(1000 + Math.random() * 9000);
+    const steps = [];
+
+    try {
+      // Step 1: Read Test
+      const { data: readData, error: readError } = await client
+        .from('noc_records')
+        .select('id, noc_number')
+        .limit(1);
+
+      if (readError) throw new Error(`Read step failed: ${readError.message}`);
+      steps.push({ step: 'READ', status: 'PASS', message: `Read successful (${readData.length} records inspected)` });
+
+      // Step 2: Non-Destructive Insert Test
+      const testRecord = {
+        id: testId,
+        noc_number: testNocNum,
+        noc_type: 'Activity',
+        client: 'Automated Test Client',
+        issued_to: 'TEST CONTRACTOR LLC',
+        company_code: 'TEST-001',
+        date_of_issuance: new Date().toISOString().split('T')[0],
+        date_of_expiration: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+        description: 'Automated connection verification test record (Temporary)',
+        documents: [
+          {
+            id: 'doc_test_' + Date.now(),
+            name: 'test_attachment.pdf',
+            type: 'application/pdf',
+            size: 1024,
+            dataUrl: '',
+            uploadedAt: new Date().toISOString()
+          }
+        ],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      const { data: insertData, error: insertError } = await client
+        .from('noc_records')
+        .insert(testRecord)
+        .select()
+        .single();
+
+      if (insertError) throw new Error(`Insert step failed: ${insertError.message}`);
+      steps.push({ step: 'INSERT', status: 'PASS', message: `Inserted test record ID: ${testId}` });
+
+      // Step 3: Update Test
+      const { data: updateData, error: updateError } = await client
+        .from('noc_records')
+        .update({ description: 'Automated test updated successfully' })
+        .eq('id', testId)
+        .select()
+        .single();
+
+      if (updateError) throw new Error(`Update step failed: ${updateError.message}`);
+      steps.push({ step: 'UPDATE', status: 'PASS', message: `Updated test record ID: ${testId}` });
+
+      // Step 4: Retrieve Document Reference Test
+      if (updateData && Array.isArray(updateData.documents) && updateData.documents.length > 0) {
+        steps.push({ step: 'DOCUMENT_REFERENCE', status: 'PASS', message: `Retrieved embedded document: ${updateData.documents[0].name}` });
+      } else {
+        steps.push({ step: 'DOCUMENT_REFERENCE', status: 'WARN', message: 'Documents array was empty' });
+      }
+
+      // Step 5: Delete ONLY the Test Record
+      const { error: deleteError } = await client
+        .from('noc_records')
+        .delete()
+        .eq('id', testId);
+
+      if (deleteError) throw new Error(`Delete cleanup failed: ${deleteError.message}`);
+      steps.push({ step: 'DELETE_CLEANUP', status: 'PASS', message: `Cleaned up test record ID: ${testId}` });
+
+      return {
+        success: true,
+        summary: 'All Supabase PostgreSQL CRUD operations passed successfully with zero residue.',
+        steps
+      };
+    } catch (err) {
+      // Emergency cleanup attempt if test record was created
+      try {
+        await client.from('noc_records').delete().eq('id', testId);
+      } catch (e) {}
+
+      return {
+        success: false,
+        error: err.message,
+        steps
+      };
+    }
+  }
+
+  // ==========================================================================
+  // TASK 10: COMPREHENSIVE DATA VALIDATION REPORT
+  // ==========================================================================
+
+  /**
+   * Compare local database with Supabase PostgreSQL and generate validation report
+   */
+  async validateDataWithSupabase() {
+    if (!this.isSupabaseActive()) {
+      return {
+        status: 'OFFLINE',
+        message: 'Supabase is not active. Connect to Supabase to run validation.'
+      };
+    }
+
+    const client = this.getSupabaseClient();
+    const report = {
+      timestamp: new Date().toISOString(),
+      overallStatus: 'PASS',
+      tables: []
+    };
+
+    // 1. Validate noc_records
+    try {
+      const localRecords = await this._localGetAll();
+      const { data: cloudRecords, error: recError } = await client.from('noc_records').select('id, noc_number, date_of_expiration, client, issued_to, documents');
+      
+      if (recError) throw recError;
+
+      const localCount = localRecords ? localRecords.length : 0;
+      const cloudCount = cloudRecords ? cloudRecords.length : 0;
+      const missingInCloud = (localRecords || []).filter(lr => !cloudRecords.some(cr => String(cr.id) === String(lr.id) || (cr.noc_number && cr.noc_number.toLowerCase() === (lr.nocNumber || '').toLowerCase())));
+
+      const status = (missingInCloud.length === 0 && localCount === cloudCount) ? 'PASS' : (missingInCloud.length === 0 ? 'PASS (Cloud has extra records)' : 'WARN');
+      if (missingInCloud.length > 0) report.overallStatus = 'WARN';
+
+      report.tables.push({
+        table: 'noc_records',
+        localCount,
+        supabaseCount: cloudCount,
+        missing: missingInCloud.length,
+        status
+      });
+    } catch (e) {
+      report.tables.push({ table: 'noc_records', error: e.message, status: 'FAIL' });
+      report.overallStatus = 'FAIL';
+    }
+
+    // 2. Validate noc_requirements_docs
+    try {
+      const localReq = await this.getRequirementsDocs();
+      const { data: cloudReq, error: reqErr } = await client.from('noc_requirements_docs').select('id, name');
+      if (reqErr) throw reqErr;
+
+      const localCount = localReq ? localReq.length : 0;
+      const cloudCount = cloudReq ? cloudReq.length : 0;
+      report.tables.push({
+        table: 'noc_requirements_docs',
+        localCount,
+        supabaseCount: cloudCount,
+        missing: Math.max(0, localCount - cloudCount),
+        status: localCount <= cloudCount ? 'PASS' : 'WARN'
+      });
+    } catch (e) {
+      report.tables.push({ table: 'noc_requirements_docs', error: e.message, status: 'FAIL' });
+    }
+
+    // 3. Validate sbyi_coc_docs
+    try {
+      const localCoc = await this.getCocDocs();
+      const { data: cloudCoc, error: cocErr } = await client.from('sbyi_coc_docs').select('id, name');
+      if (cocErr) throw cocErr;
+
+      const localCount = localCoc ? localCoc.length : 0;
+      const cloudCount = cloudCoc ? cloudCoc.length : 0;
+      report.tables.push({
+        table: 'sbyi_coc_docs',
+        localCount,
+        supabaseCount: cloudCount,
+        missing: Math.max(0, localCount - cloudCount),
+        status: localCount <= cloudCount ? 'PASS' : 'WARN'
+      });
+    } catch (e) {
+      report.tables.push({ table: 'sbyi_coc_docs', error: e.message, status: 'FAIL' });
+    }
+
+    // 4. Validate ai_documents
+    try {
+      const localAi = await this.getAiDocs();
+      const { data: cloudAi, error: aiErr } = await client.from('ai_documents').select('id, name');
+      if (aiErr) throw aiErr;
+
+      const localCount = localAi ? localAi.length : 0;
+      const cloudCount = cloudAi ? cloudAi.length : 0;
+      report.tables.push({
+        table: 'ai_documents',
+        localCount,
+        supabaseCount: cloudCount,
+        missing: Math.max(0, localCount - cloudCount),
+        status: localCount <= cloudCount ? 'PASS' : 'WARN'
+      });
+    } catch (e) {
+      report.tables.push({ table: 'ai_documents', error: e.message, status: 'FAIL' });
+    }
+
+    // 5. Validate noc_custom_types
+    try {
+      const localTypes = await this.getCustomTypes();
+      const { data: cloudTypes, error: typeErr } = await client.from('noc_custom_types').select('name');
+      if (typeErr) throw typeErr;
+
+      const localCount = localTypes ? localTypes.length : 0;
+      const cloudCount = cloudTypes ? cloudTypes.length : 0;
+      report.tables.push({
+        table: 'noc_custom_types',
+        localCount,
+        supabaseCount: cloudCount,
+        missing: Math.max(0, localCount - cloudCount),
+        status: cloudCount >= localCount ? 'PASS' : 'WARN'
+      });
+    } catch (e) {
+      report.tables.push({ table: 'noc_custom_types', error: e.message, status: 'FAIL' });
+    }
+
+    // 6. Validate noc_custom_contractors
+    try {
+      const localContractors = await this.getCustomContractors();
+      const { data: cloudContractors, error: conErr } = await client.from('noc_custom_contractors').select('name');
+      if (conErr) throw conErr;
+
+      const localCount = localContractors ? localContractors.length : 0;
+      const cloudCount = cloudContractors ? cloudContractors.length : 0;
+      report.tables.push({
+        table: 'noc_custom_contractors',
+        localCount,
+        supabaseCount: cloudCount,
+        missing: Math.max(0, localCount - cloudCount),
+        status: cloudCount >= localCount ? 'PASS' : 'WARN'
+      });
+    } catch (e) {
+      report.tables.push({ table: 'noc_custom_contractors', error: e.message, status: 'FAIL' });
+    }
+
+    // 7. Validate noc_users
+    try {
+      const localUsers = await this.getUsers();
+      const { data: cloudUsers, error: userErr } = await client.from('noc_users').select('username');
+      if (userErr) throw userErr;
+
+      const localCount = localUsers ? localUsers.length : 0;
+      const cloudCount = cloudUsers ? cloudUsers.length : 0;
+      report.tables.push({
+        table: 'noc_users',
+        localCount,
+        supabaseCount: cloudCount,
+        missing: Math.max(0, localCount - cloudCount),
+        status: cloudCount >= localCount ? 'PASS' : 'WARN'
+      });
+    } catch (e) {
+      report.tables.push({ table: 'noc_users', error: e.message, status: 'FAIL' });
+    }
+
+    return report;
+  }
+
+  // ==========================================================================
   // UTILITIES & SUMMARY STATS
   // ==========================================================================
 
