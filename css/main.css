@@ -598,6 +598,16 @@ button, input, select, textarea {
   z-index: 2;
 }
 
+.hero-sub-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  position: relative;
+  z-index: 2;
+}
+
 .hero-user-display {
   display: inline-flex;
   align-items: center;
@@ -2175,10 +2185,19 @@ button, input, select, textarea, a, .view-btn, .pagination-btn, .db-status-badge
     min-height: 42px;
   }
 
+  .hero-sub-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+  }
+
   .hero-user-display {
     justify-content: center;
-    width: 100%;
-    margin-top: 0.25rem;
+    width: auto;
+    margin-top: 0;
   }
 
   /* Stats Grid */
@@ -3900,6 +3919,29 @@ body:not(.role-developer) #sbyimAIModal {
   color: #3730A3;
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(99, 102, 241, 0.15);
+}
+
+.hero-actions .db-status-badge {
+  background: #FFFFFF;
+  border: 1px solid #CBD5E1;
+  color: #0F172A;
+  font-weight: 600;
+  font-size: 0.84rem;
+  padding: 0.46rem 0.95rem;
+  border-radius: var(--radius-full);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.hero-actions .db-status-badge:hover:not(:disabled) {
+  background: #F8FAFC;
+  border-color: #10B981;
+  color: #065F46;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.18);
 }
 
 /* User Database Table Scroll Container (Horizontal & Vertical) */
