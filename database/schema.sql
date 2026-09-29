@@ -199,6 +199,26 @@ CREATE POLICY "Allow all operations on noc_users"
     ON public.noc_users FOR ALL TO public USING (true) WITH CHECK (true);
 
 -- ----------------------------------------------------------------------------
+-- 10.1 Supabase Realtime Multi-Browser Replication & Publication
+-- ----------------------------------------------------------------------------
+ALTER TABLE public.noc_records REPLICA IDENTITY FULL;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables 
+        WHERE pubname = 'supabase_realtime' 
+        AND schemaname = 'public' 
+        AND tablename = 'noc_records'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.noc_records;
+    END IF;
+EXCEPTION
+    WHEN OTHERS THEN
+        NULL;
+END $$;
+
+-- ----------------------------------------------------------------------------
 -- 11. Seed Default Types, Contractors, Records, Settings & Accounts
 -- ----------------------------------------------------------------------------
 INSERT INTO public.noc_custom_types (name)

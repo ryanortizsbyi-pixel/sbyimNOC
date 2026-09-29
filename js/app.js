@@ -92,6 +92,9 @@ class NOCApp {
         if (window.sbyimAIUI) window.sbyimAIUI.updateKnowledgeStatusBadge();
       }).catch(err => console.warn('AI Knowledge Base initial sync warning:', err));
     }
+
+    // 9. Initialize Supabase Realtime multi-browser synchronization
+    this.setupRealtimeSubscription();
   }
 
   /**
@@ -2942,6 +2945,117 @@ trailer
   }
 
   /**
+   * Setup Supabase Realtime synchronization for live multi-browser updates
+   */
+  setupRealtimeSubscription() {
+    if (this._realtimeUnsubscribe) {
+      try { this._realtimeUnsubscribe(); } catch (e) {}
+      this._realtimeUnsubscribe = null;
+    }
+
+    if (window.nocDB && typeof window.nocDB.subscribeToRealtimeRecords === 'function') {
+      this._realtimeUnsubscribe = window.nocDB.subscribeToRealtimeRecords(async ({ records, stats, payload }) => {
+        console.log(`⚡ [NOCApp Realtime] Event: ${payload ? payload.eventType : 'SYNC'}`, payload);
+        await this.handleRealtimeEventSync(records, stats, payload);
+      });
+    }
+
+    // Auto-cleanup on window unmount / page navigation
+    if (!this._hasBoundUnload) {
+      this._hasBoundUnload = true;
+      window.addEventListener('beforeunload', () => this.cleanupRealtime());
+      window.addEventListener('pagehide', () => this.cleanupRealtime());
+    }
+  }
+
+  /**
+   * Handle real-time database synchronizations across multiple browsers
+   * - Triggered automatically on INSERT, UPDATE, DELETE from any browser
+   * - Updates dashboard counters (Total, Active, Expiring, Expired)
+   * - Re-renders active table / grid view with current filter criteria
+   * - Updates categories and contractor options
+   */
+  async handleRealtimeEventSync(records, stats, payload) {
+    if (!Array.isArray(records)) return;
+
+    // 1. Update in-memory records cache with latest Supabase records (single source of truth)
+    this.allRecords = records;
+    this.allRecords.forEach(r => {
+      if (r && r.issuedTo) {
+        r.issuedTo = String(r.issuedTo).trim().toUpperCase();
+      }
+    });
+
+    // 2. Automatically recalculate & render Total NOC Records, Active Permits, Expiring Soon, and Expired Permits
+    if (stats && window.nocUI && typeof window.nocUI.renderStats === 'function') {
+      window.nocUI.renderStats(stats);
+    }
+
+    // 3. Update dashboard table / grid view automatically with current filters and search
+    this.applyFilters();
+
+    // 4. Update dropdown categories and contractor options
+    this.populateTypeFilterOptions();
+
+    // 5. If user currently has a view/edit modal open for an affected record, synchronize modal state
+    this.handleRealtimeModalSync(payload);
+
+    // 6. Display a sleek toast notification indicating automatic synchronization
+    const eventType = payload ? payload.eventType : '';
+    const newRecord = payload ? payload.new : null;
+    const oldRecord = payload ? payload.old : null;
+    const targetNoc = (newRecord && newRecord.noc_number) || (oldRecord && oldRecord.noc_number) || '';
+
+    if (eventType === 'INSERT') {
+      window.showToast(`⚡ Realtime: New NOC ${targetNoc ? '"' + targetNoc + '"' : 'record'} created in Supabase. Dashboard updated.`, 'info');
+    } else if (eventType === 'UPDATE') {
+      window.showToast(`⚡ Realtime: NOC ${targetNoc ? '"' + targetNoc + '"' : 'record'} updated in Supabase. Dashboard updated.`, 'info');
+    } else if (eventType === 'DELETE') {
+      window.showToast(`⚡ Realtime: NOC ${targetNoc ? '"' + targetNoc + '"' : 'record'} removed from Supabase. Dashboard updated.`, 'info');
+    }
+  }
+
+  /**
+   * Handle real-time modal synchronization if a record open in a modal is modified or deleted elsewhere
+   */
+  handleRealtimeModalSync(payload) {
+    if (!payload || !window.nocUI) return;
+    const eventType = payload.eventType;
+    const targetId = String((payload.old && payload.old.id) || (payload.new && payload.new.id) || '');
+    const targetNoc = (payload.old && payload.old.noc_number) || (payload.new && payload.new.noc_number) || '';
+
+    // If Edit Modal is currently open for the modified/deleted record
+    if (window.nocUI.currentEditingId && (String(window.nocUI.currentEditingId) === targetId || (targetNoc && window.nocUI.currentEditingId === targetNoc))) {
+      if (eventType === 'DELETE') {
+        window.nocUI.closeEntryModal();
+        window.showToast('⚠️ The record currently being edited was removed from another session.', 'error');
+      }
+    }
+
+    // If Delete Confirmation Modal is open for the deleted record
+    if (window.nocUI.pendingDeleteId && (String(window.nocUI.pendingDeleteId) === targetId || (targetNoc && window.nocUI.pendingDeleteId === targetNoc))) {
+      if (eventType === 'DELETE') {
+        window.nocUI.closeDeleteModal();
+      }
+    }
+  }
+
+  /**
+   * Clean up realtime subscription (used when unmounting component or reloading page)
+   */
+  cleanupRealtime() {
+    if (typeof this._realtimeUnsubscribe === 'function') {
+      try {
+        this._realtimeUnsubscribe();
+      } catch (e) {}
+      this._realtimeUnsubscribe = null;
+    }
+    if (window.nocDB && typeof window.nocDB.unsubscribeRealtime === 'function') {
+      window.nocDB.unsubscribeRealtime();
+    }
+  }
+
+  /**
    * Universal Show/Hide Password Toggle Handler
    */
   setupPasswordToggle(btnId, inputId, labelText = 'password') {
@@ -2963,7 +3077,33 @@ trailer
       btn.classList.toggle('active', isPassword);
     });
   }
+
+  /**
+   * Component destruction lifecycle method
+   */
+  destroy() {
+    this.cleanupRealtime();
+  }
 }
+
+/**
+ * Global Realtime subscription helper for React Components:
+ * 
+ * Example React Component usage:
+ * useEffect(() => {
+ *   const unsubscribe = window.subscribeToNocRealtime(({ records, stats, payload }) => {
+ *     setRecords(records);
+ *     setStats(stats);
+ *   });
+ *   return () => unsubscribe(); // Clean up realtime subscription when component unmounts
+ * }, []);
+ */
+window.subscribeToNocRealtime = function(callback) {
+  if (window.nocDB && typeof window.nocDB.subscribeToRealtimeRecords === 'function') {
+    return window.nocDB.subscribeToRealtimeRecords(callback);
+  }
+  return () => {};
+};
 
 // Bootstrap application once DOM is ready
 document.addEventListener('DOMContentLoaded', () => {

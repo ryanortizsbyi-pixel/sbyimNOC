@@ -19,6 +19,7 @@ class SupabaseConfigManager {
     this._connectionPromise = null;
     this._retryTimer = null;
     this._heartbeatTimer = null;
+    this._realtimeChannels = new Map();
 
     // Initialize client instance immediately
     this.initClient();
@@ -26,7 +27,7 @@ class SupabaseConfigManager {
     // Auto-connect immediately in background
     this.autoConnect();
 
-    // Setup network and lifecycle event listeners for automatic reconnection
+    // Setup network and lifecycle event listeners for automatic reconnection and unmount cleanup
     this.setupAutoReconnect();
   }
 
@@ -196,6 +197,9 @@ class SupabaseConfigManager {
   /**
    * Setup auto-reconnect event listeners
    */
+  /**
+   * Setup auto-reconnect event listeners and unmount cleanup
+   */
   setupAutoReconnect() {
     // Re-verify when device comes online
     window.addEventListener('online', () => {
@@ -210,6 +214,14 @@ class SupabaseConfigManager {
       }
     });
 
+    // Cleanup all active channels when browser window/tab is closed or unloaded
+    window.addEventListener('beforeunload', () => {
+      this.unsubscribeAllChannels();
+    });
+    window.addEventListener('pagehide', () => {
+      this.unsubscribeAllChannels();
+    });
+
     // Setup periodic keep-alive / health check every 45 seconds
     if (!this._heartbeatTimer) {
       this._heartbeatTimer = setInterval(() => {
@@ -217,6 +229,106 @@ class SupabaseConfigManager {
           this.testConnection().catch(() => {});
         }
       }, 45000);
+    }
+  }
+
+  /**
+   * Subscribe to Supabase Realtime changes on a specific PostgreSQL table.
+   * Listens for all database operations (INSERT, UPDATE, DELETE).
+   *
+   * @param {string} channelKey Unique identifier for the subscription channel
+   * @param {string} table Database table name (e.g. 'noc_records')
+   * @param {Function} onEvent Callback invoked when an INSERT, UPDATE, or DELETE happens
+   * @param {Function} [onStatusChange] Optional callback invoked when channel subscription status changes
+   * @returns {Function} Unsubscribe cleanup function to call on unmount
+   */
+  subscribeToTable(channelKey, table, onEvent, onStatusChange = null) {
+    const client = this.getClient();
+    if (!client) {
+      console.warn(`Supabase client not available to subscribe to ${table}`);
+      return () => {};
+    }
+
+    // Clean up existing channel with same key if present
+    this.unsubscribeChannel(channelKey);
+
+    try {
+      const channel = client
+        .channel(channelKey)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: table
+          },
+          (payload) => {
+            console.log(`⚡ [Realtime:${table}] Received event (${payload.eventType}):`, payload);
+            if (typeof onEvent === 'function') {
+              try {
+                onEvent(payload);
+              } catch (err) {
+                console.error(`Error in realtime handler for ${table}:`, err);
+              }
+            }
+          }
+        )
+        .subscribe((status, err) => {
+          console.log(`⚡ [Realtime:${table}] Channel status: ${status}`, err ? `(Note: ${err.message})` : '');
+          if (typeof onStatusChange === 'function') {
+            try {
+              onStatusChange(status, err);
+            } catch (statusErr) {
+              console.warn('Error in realtime status handler:', statusErr);
+            }
+          }
+        });
+
+      this._realtimeChannels.set(channelKey, channel);
+
+      // Return cleanup function (can be directly returned in React useEffect or called on unmount)
+      return () => {
+        this.unsubscribeChannel(channelKey);
+      };
+    } catch (e) {
+      console.error(`Failed to create realtime channel for ${table}:`, e);
+      return () => {};
+    }
+  }
+
+  /**
+   * Unsubscribe and remove a specific realtime channel
+   * @param {string} channelKey
+   */
+  unsubscribeChannel(channelKey) {
+    if (this._realtimeChannels && this._realtimeChannels.has(channelKey)) {
+      const channel = this._realtimeChannels.get(channelKey);
+      this._realtimeChannels.delete(channelKey);
+      if (channel && this.client) {
+        try {
+          this.client.removeChannel(channel);
+          console.log(`⚡ [Realtime] Cleaned up & unsubscribed channel: ${channelKey}`);
+        } catch (e) {
+          console.warn(`Error removing channel ${channelKey}:`, e);
+        }
+      }
+    }
+  }
+
+  /**
+   * Unsubscribe and clean up all active realtime channels (used on unmount/reconnect)
+   */
+  unsubscribeAllChannels() {
+    if (this._realtimeChannels && this._realtimeChannels.size > 0) {
+      for (const [key, channel] of this._realtimeChannels.entries()) {
+        if (channel && this.client) {
+          try {
+            this.client.removeChannel(channel);
+          } catch (e) {}
+        }
+      }
+      this._realtimeChannels.clear();
+      console.log('⚡ [Realtime] All realtime channels cleaned up.');
     }
   }
 

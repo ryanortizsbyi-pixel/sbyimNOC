@@ -16,6 +16,29 @@ class NOCDatabase {
     this.localDb = null;
     this._localDbPromise = null;
     this._docMemoryCache = new Map();
+    this._realtimeListeners = new Set();
+    this._realtimeUnsubscribe = null;
+    this._realtimeSubscribed = false;
+
+    // Purge any legacy localStorage main database items (Supabase is single source of truth)
+    try {
+      localStorage.removeItem('noc_records_v1');
+      localStorage.removeItem('noc_records');
+    } catch (e) {}
+
+    // Listen to Supabase config/connection changes to re-establish realtime channel if active
+    if (typeof window !== 'undefined') {
+      window.addEventListener('noc:supabase-config-change', (e) => {
+        if (e.detail && e.detail.isConnected) {
+          if (this._realtimeListeners.size > 0 && !this._realtimeSubscribed) {
+            this._initRealtimeSubscription();
+          }
+        } else if (e.detail && !e.detail.isConnected) {
+          this._realtimeSubscribed = false;
+        }
+      });
+    }
+
     this.initPromise = this.init();
   }
 
@@ -92,6 +115,9 @@ class NOCDatabase {
         const status = await window.supabaseManager.testConnection();
         if (status.success) {
           console.log('⚡ NOCDatabase: Connected to Supabase PostgreSQL database.');
+          if (this._realtimeListeners.size > 0 && !this._realtimeSubscribed) {
+            this._initRealtimeSubscription();
+          }
         } else {
           console.warn('NOCDatabase: Supabase connection note:', status.message);
         }
@@ -122,16 +148,10 @@ class NOCDatabase {
       await this._localDelete(id).catch(() => {});
     }
 
-    // 2. Delete from localStorage
+    // 2. Permanently purge legacy NOC records from localStorage (Supabase is single source of truth)
     try {
-      const rawRecords = localStorage.getItem('noc_records_v1');
-      if (rawRecords) {
-        let records = JSON.parse(rawRecords);
-        if (Array.isArray(records)) {
-          const filtered = records.filter(r => !demoIds.includes(r.id) && !demoNocNumbers.includes(r.nocNumber));
-          localStorage.setItem('noc_records_v1', JSON.stringify(filtered));
-        }
-      }
+      localStorage.removeItem('noc_records_v1');
+      localStorage.removeItem('noc_records');
     } catch (e) {}
 
     // 3. Delete from Supabase if connected
@@ -439,15 +459,10 @@ class NOCDatabase {
 
   /**
    * Retrieve all NOC records.
+   * Supabase PostgreSQL serves as the SINGLE SOURCE OF TRUTH.
+   * When Supabase is connected, records are queried directly from Supabase.
    */
   async getAll() {
-    let localRecords = [];
-    try {
-      localRecords = await this._localGetAll();
-    } catch (e) {
-      console.warn('Error fetching local records in getAll:', e);
-    }
-
     if (this.isSupabaseActive()) {
       try {
         const client = this.getSupabaseClient();
@@ -459,80 +474,146 @@ class NOCDatabase {
 
         if (error) throw error;
 
-        // If Supabase returned records, merge cloud records and local records so newly added local records and high-res dataUrls are preserved
-        if (data && data.length > 0) {
+        // When Supabase query succeeds, Supabase data IS the single source of truth
+        if (data && Array.isArray(data)) {
           const cloudRecords = data.map(row => this.mapDbToRecord(row));
-          const recordMap = new Map();
-          const localMap = new Map();
-          (localRecords || []).forEach(r => {
-            if (r) localMap.set(String(r.id || r.nocNumber), r);
-          });
 
-          cloudRecords.forEach(r => {
-            if (r) {
-              const key = String(r.id || r.nocNumber);
-              const localMatch = localMap.get(key);
-              if (localMatch) {
-                // Merge documents to keep authentic dataUrls from local IndexedDB
-                if (Array.isArray(r.documents) && Array.isArray(localMatch.documents)) {
-                  r.documents = r.documents.map(cd => {
-                    if (!cd.dataUrl) {
-                      const ld = localMatch.documents.find(d => d.id === cd.id || d.name === cd.name);
-                      if (ld && ld.dataUrl) {
-                        return { ...cd, dataUrl: ld.dataUrl };
-                      }
-                    }
-                    return cd;
-                  });
-                } else if ((!r.documents || r.documents.length === 0) && Array.isArray(localMatch.documents) && localMatch.documents.length > 0) {
-                  r.documents = localMatch.documents;
+          // Resolve attached document dataUrls from memory cache or document store
+          for (const r of cloudRecords) {
+            if (r && Array.isArray(r.documents)) {
+              for (const d of r.documents) {
+                if (!d.dataUrl) {
+                  const dData = this._docMemoryCache.get(String(d.id)) || this._docMemoryCache.get(String(d.name));
+                  if (dData) d.dataUrl = dData;
+                } else {
+                  if (d.id) this._docMemoryCache.set(String(d.id), d.dataUrl);
+                  if (d.name) this._docMemoryCache.set(String(d.name), d.dataUrl);
                 }
               }
-
-              // Also resolve any missing document dataUrls from local cache/store
-              if (Array.isArray(r.documents)) {
-                for (const d of r.documents) {
-                  if (!d.dataUrl) {
-                    const dData = this._docMemoryCache.get(String(d.id)) || this._docMemoryCache.get(String(d.name));
-                    if (dData) d.dataUrl = dData;
-                  }
-                }
-              }
-
-              recordMap.set(key, r);
             }
-          });
+          }
 
-          (localRecords || []).forEach(r => {
-            if (r) {
-              const key = String(r.id || r.nocNumber);
-              if (!recordMap.has(key)) {
-                recordMap.set(key, r);
-              }
-            }
-          });
+          // Sync local IndexedDB cache store so offline fallback accurately mirrors Supabase (removing deleted records)
+          this._localSetStoreItems(LOCAL_STORE_NAME, cloudRecords).catch(() => {});
 
-          const merged = Array.from(recordMap.values());
-          // Update local IndexedDB cache in background
-          this._localBulkInsert(merged).catch(() => {});
-          return merged;
+          return cloudRecords;
         }
 
-        // If Supabase is connected but empty, auto-sync local records to Supabase
-        if (localRecords && localRecords.length > 0) {
-          console.log(`Supabase database table is empty. Auto-syncing ${localRecords.length} local records to Supabase...`);
-          this.syncLocalToSupabase().catch(e => console.warn('Background auto-sync to Supabase warning:', e));
-          return localRecords;
-        }
-
-        return localRecords || [];
+        return [];
       } catch (err) {
-        console.warn('Supabase getAll failed, falling back to local DB:', err.message);
+        console.warn('Supabase getAll failed, falling back to local DB cache:', err.message);
       }
     }
 
-    // Local IndexedDB Fallback
+    // Local IndexedDB Fallback (only when offline or Supabase not configured)
+    let localRecords = [];
+    try {
+      localRecords = await this._localGetAll();
+    } catch (e) {
+      console.warn('Error fetching local records in getAll:', e);
+    }
     return localRecords || [];
+  }
+
+  /**
+   * Subscribe to Supabase Realtime changes on the NOC records table.
+   *
+   * Realtime Event Lifecycle:
+   * - Listens for INSERT, UPDATE, and DELETE events from Supabase Realtime broadcast.
+   * - After every realtime event, automatically fetches the latest NOC records from Supabase (single source of truth).
+   * - Automatically recalculates Total NOC Records, Active Permits, Expiring Soon, and Expired Permits.
+   * - Updates all registered subscriber callbacks without requiring a page refresh.
+   * - Returns a clean unsubscribe function to call when the component unmounts.
+   *
+   * @param {Function} [callback] Optional listener ({ records, stats, payload }) => void
+   * @returns {Function} Unsubscribe cleanup function to call on unmount
+   */
+  subscribeToRealtimeRecords(callback = null) {
+    if (typeof callback === 'function') {
+      this._realtimeListeners.add(callback);
+    }
+
+    if (!this._realtimeSubscribed && this.isSupabaseActive()) {
+      this._initRealtimeSubscription();
+    }
+
+    // Return cleanup function (can be directly returned in React useEffect or called on unmount)
+    return () => {
+      if (typeof callback === 'function') {
+        this._realtimeListeners.delete(callback);
+      }
+      if (this._realtimeListeners.size === 0) {
+        this.unsubscribeRealtime();
+      }
+    };
+  }
+
+  /**
+   * Initialize Supabase Realtime channel subscription on noc_records table
+   */
+  _initRealtimeSubscription() {
+    if (!window.supabaseManager || !this.isSupabaseActive()) return;
+
+    this._realtimeSubscribed = true;
+    console.log('⚡ Initializing Supabase Realtime channel subscription on noc_records table...');
+
+    const unsubscribe = window.supabaseManager.subscribeToTable(
+      'noc_records_realtime_channel',
+      'noc_records',
+      async (payload) => {
+        console.log(`⚡ [Realtime Event: noc_records] Action: ${payload.eventType}`, payload);
+
+        try {
+          // Requirement: "After every realtime database event, fetch the latest NOC records from Supabase."
+          // Requirement: "Supabase must remain the single source of truth."
+          const freshRecords = await this.getAll();
+
+          // Requirement: "Automatically recalculate Total NOC Records, Active Permits, Expiring Soon, and Expired Permits."
+          const freshStats = await this.getStatistics(freshRecords);
+
+          // Invoke all registered callbacks
+          for (const listener of this._realtimeListeners) {
+            try {
+              listener({ records: freshRecords, stats: freshStats, payload });
+            } catch (err) {
+              console.error('Error in realtime listener callback:', err);
+            }
+          }
+
+          // Broadcast window event
+          window.dispatchEvent(new CustomEvent('noc:realtime-records-change', {
+            detail: { records: freshRecords, stats: freshStats, payload }
+          }));
+        } catch (fetchErr) {
+          console.error('Failed to fetch fresh records after realtime event:', fetchErr);
+        }
+      },
+      (status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('⚡ Supabase Realtime channel subscribed successfully for table noc_records.');
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn(`Supabase Realtime channel warning (${status}):`, err);
+        }
+      }
+    );
+
+    this._realtimeUnsubscribe = unsubscribe;
+  }
+
+  /**
+   * Unsubscribe and clean up Supabase Realtime subscription on noc_records
+   */
+  unsubscribeRealtime() {
+    this._realtimeSubscribed = false;
+    if (typeof this._realtimeUnsubscribe === 'function') {
+      try {
+        this._realtimeUnsubscribe();
+      } catch (e) {}
+      this._realtimeUnsubscribe = null;
+    }
+    if (window.supabaseManager) {
+      window.supabaseManager.unsubscribeChannel('noc_records_realtime_channel');
+    }
   }
 
   /**
@@ -1797,23 +1878,22 @@ class NOCDatabase {
       }
       localStorage.setItem('noc_custom_contractors', JSON.stringify(customContractors));
 
-      // Update local storage records
-      const rawRecords = localStorage.getItem('noc_records_v1');
-      if (rawRecords) {
-        let records = JSON.parse(rawRecords);
-        if (Array.isArray(records)) {
+      // Also update local IndexedDB records cache
+      try {
+        const localRecs = await this._localGetAll();
+        if (Array.isArray(localRecs)) {
           let modified = false;
-          records.forEach(r => {
+          localRecs.forEach(r => {
             if (r.issuedTo && r.issuedTo.trim().toUpperCase() === oldTrimmed) {
               r.issuedTo = newTrimmed;
               modified = true;
             }
           });
           if (modified) {
-            localStorage.setItem('noc_records_v1', JSON.stringify(records));
+            await this._localSetStoreItems(LOCAL_STORE_NAME, localRecs);
           }
         }
-      }
+      } catch (e) {}
 
       // Also sync renames to Supabase noc_settings table
       if (this.isSupabaseActive()) {
@@ -2695,9 +2775,15 @@ class NOCDatabase {
 
   /**
    * Get summary statistics for dashboard counters.
+   * Automatically recalculates Total NOC Records, Active Permits, Expiring Soon, and Expired Permits.
+   *
+   * @param {Array} [providedRecords] Optional array of records to compute stats from directly
    */
-  async getStatistics() {
-    const records = await this.getAll();
+  async getStatistics(providedRecords = null) {
+    const records = (providedRecords && Array.isArray(providedRecords))
+      ? providedRecords
+      : await this.getAll();
+
     let active = 0;
     let expiring = 0;
     let expired = 0;
@@ -2826,45 +2912,13 @@ class NOCDatabase {
   }
 
   _getFromLocalStorageBackup() {
-    try {
-      const raw = localStorage.getItem('noc_records_v1');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      }
-    } catch (e) {}
+    // Supabase is single source of truth; main NOC database is never retrieved from localStorage
     return null;
   }
 
   _saveToLocalStorageBackup(records) {
-    if (!Array.isArray(records)) return;
-    try {
-      // First try to save directly (preserving authentic dataUrls)
-      localStorage.setItem('noc_records_v1', JSON.stringify(records));
-    } catch (e) {
-      // If browser localStorage quota is exceeded, save metadata backup with stripped dataUrls
-      try {
-        const safeRecords = records.map(r => {
-          if (r && r.documents && r.documents.length > 0) {
-            const safeDocs = r.documents.map(d => ({
-              id: d.id,
-              name: d.name,
-              type: d.type,
-              size: d.size,
-              dataUrl: d.dataUrl && d.dataUrl.length < 50000 ? d.dataUrl : '',
-              uploadedAt: d.uploadedAt
-            }));
-            return { ...r, documents: safeDocs };
-          }
-          return r;
-        });
-        localStorage.setItem('noc_records_v1', JSON.stringify(safeRecords));
-      } catch (e2) {
-        console.warn('LocalStorage backup quota note:', e2);
-      }
-    }
+    // Supabase is single source of truth; main NOC database is never stored in localStorage
+    return;
   }
 
   async _localGetAll() {
@@ -2882,14 +2936,6 @@ class NOCDatabase {
           resolve([]);
         }
       });
-    }
-
-    // Fallback to localStorage backup if IndexedDB is empty
-    if (!records || records.length === 0) {
-      const lsBackup = this._getFromLocalStorageBackup();
-      if (lsBackup && lsBackup.length > 0) {
-        records = lsBackup;
-      }
     }
 
     // Fallback to initial seed dataset if still empty
@@ -3001,13 +3047,6 @@ class NOCDatabase {
       }
     }
 
-    if (!r) {
-      const lsBackup = this._getFromLocalStorageBackup();
-      if (lsBackup) {
-        r = lsBackup.find(x => String(x.id) === strId || (x.nocNumber && String(x.nocNumber).trim().toLowerCase() === strId.toLowerCase())) || null;
-      }
-    }
-
     if (!r && window.nocApp && Array.isArray(window.nocApp.allRecords)) {
       r = window.nocApp.allRecords.find(x => String(x.id) === strId || (x.nocNumber && String(x.nocNumber).trim().toLowerCase() === strId.toLowerCase())) || null;
     }
@@ -3047,13 +3086,6 @@ class NOCDatabase {
           resolve(null);
         }
       });
-    }
-
-    if (!r) {
-      const lsBackup = this._getFromLocalStorageBackup();
-      if (lsBackup) {
-        r = lsBackup.find(x => x.nocNumber && x.nocNumber.trim().toLowerCase() === cleanNum) || null;
-      }
     }
 
     if (r && r.issuedTo) r.issuedTo = String(r.issuedTo).trim().toUpperCase();
@@ -3192,18 +3224,6 @@ class NOCDatabase {
       }
     }
 
-    // Mirror to localStorage backup
-    try {
-      const existing = this._getFromLocalStorageBackup() || (window.INITIAL_NOC_SEED_DATA ? [...window.INITIAL_NOC_SEED_DATA] : []);
-      const idx = existing.findIndex(r => String(r.id) === String(record.id) || (r.nocNumber && r.nocNumber.toLowerCase() === (record.nocNumber || '').toLowerCase()));
-      if (idx >= 0) {
-        existing[idx] = record;
-      } else {
-        existing.unshift(record);
-      }
-      this._saveToLocalStorageBackup(existing);
-    } catch (e) {}
-
     return record;
   }
 
@@ -3279,20 +3299,6 @@ class NOCDatabase {
         }
       });
     }
-
-    // Mirror to localStorage backup
-    try {
-      const existing = this._getFromLocalStorageBackup();
-      if (existing) {
-        const filtered = existing.filter(r => {
-          if (String(r.id) === strId || r.id === Number(id)) return false;
-          if (cleanNoc && r.nocNumber && String(r.nocNumber).trim().toLowerCase() === cleanNoc) return false;
-          if (cleanNoc && r.noc_number && String(r.noc_number).trim().toLowerCase() === cleanNoc) return false;
-          return true;
-        });
-        this._saveToLocalStorageBackup(filtered);
-      }
-    } catch (e) {}
 
     // In-memory seed data removal so it doesn't resurrect if IndexedDB falls back
     try {
@@ -3382,18 +3388,6 @@ class NOCDatabase {
       });
     }
 
-    // Mirror to localStorage backup
-    try {
-      const existing = this._getFromLocalStorageBackup();
-      if (existing) {
-        const filtered = existing.filter(r => {
-          const valNoc = r.nocNumber ? String(r.nocNumber).trim().toLowerCase() : (r.noc_number ? String(r.noc_number).trim().toLowerCase() : '');
-          return !strIds.has(String(r.id)) && (!valNoc || !cleanNocs.has(valNoc));
-        });
-        this._saveToLocalStorageBackup(filtered);
-      }
-    } catch (e) {}
-
     // In-memory seed data
     try {
       if (window.INITIAL_NOC_SEED_DATA && Array.isArray(window.INITIAL_NOC_SEED_DATA)) {
@@ -3444,8 +3438,6 @@ class NOCDatabase {
       }
     }
 
-    // Mirror to localStorage backup
-    this._saveToLocalStorageBackup(records);
     return true;
   }
 
