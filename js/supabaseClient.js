@@ -222,14 +222,8 @@ class SupabaseConfigManager {
       this.unsubscribeAllChannels();
     });
 
-    // Setup periodic keep-alive / health check every 45 seconds
-    if (!this._heartbeatTimer) {
-      this._heartbeatTimer = setInterval(() => {
-        if (navigator.onLine !== false) {
-          this.testConnection().catch(() => {});
-        }
-      }, 45000);
-    }
+    // Note: Periodic interval polling removed to prevent continuous PostgREST egress.
+    // Reconnection is automatically handled event-driven by 'online' and 'focus' event listeners above.
   }
 
   /**
@@ -362,6 +356,7 @@ class SupabaseConfigManager {
       this.client = activeClient;
 
       // Query noc_records table (limit 1) to test table access and RLS with 4-second timeout
+      console.log('[Supabase] Testing PostgreSQL connection status');
       const queryPromise = activeClient
         .from('noc_records')
         .select('id')

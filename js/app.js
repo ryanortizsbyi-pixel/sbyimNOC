@@ -12,7 +12,7 @@ class NOCApp {
     this.selectedType = 'all';
     this.sortBy = 'newest';
     this.currentPage = 1;
-    this.pageSize = 10;
+    this.pageSize = 25;
   }
 
   /**
@@ -803,7 +803,11 @@ class NOCApp {
               window.nocUI.selectedRecordIds.delete(Number(idToDelete));
               window.nocUI.updateBulkActionsBar();
             }
-            await this.refreshData();
+            // Local state update without full database re-fetch (zero egress)
+            const stats = await window.nocDB.getStatistics(this.allRecords);
+            window.nocUI.renderStats(stats);
+            this.applyFilters();
+            this.populateTypeFilterOptions();
             window.showToast('🗑️ NOC Record permanently deleted from Local Database and Supabase PostgreSQL.', 'success');
           } catch (err) {
             console.error('Single delete error:', err);
@@ -945,7 +949,11 @@ class NOCApp {
           window.nocUI.closeBulkDeleteModal();
           window.nocUI.updateBulkActionsBar();
           
-          await this.refreshData();
+          // Local state update without full database re-fetch (zero egress)
+          const stats = await window.nocDB.getStatistics(this.allRecords);
+          window.nocUI.renderStats(stats);
+          this.applyFilters();
+          this.populateTypeFilterOptions();
           window.showToast(`🎉 Successfully deleted ${idsToDelete.length} NOC record${idsToDelete.length === 1 ? '' : 's'}.`, 'success', 5000);
         } catch (err) {
           console.error('Bulk deletion error:', err);
@@ -2666,7 +2674,11 @@ class NOCApp {
       const filterSort = document.getElementById('filterSort');
       if (filterSort) filterSort.value = 'newest';
 
-      await this.refreshData();
+      // Local state update without full database re-fetch (zero egress)
+      const stats = await window.nocDB.getStatistics(this.allRecords);
+      window.nocUI.renderStats(stats);
+      this.applyFilters();
+      this.populateTypeFilterOptions();
     } catch (err) {
       console.error('Error submitting NOC record:', err);
       window.showToast('Could not save record: ' + err.message, 'error');
@@ -2954,9 +2966,9 @@ trailer
     }
 
     if (window.nocDB && typeof window.nocDB.subscribeToRealtimeRecords === 'function') {
-      this._realtimeUnsubscribe = window.nocDB.subscribeToRealtimeRecords(async ({ records, stats, payload }) => {
-        console.log(`⚡ [NOCApp Realtime] Event: ${payload ? payload.eventType : 'SYNC'}`, payload);
-        await this.handleRealtimeEventSync(records, stats, payload);
+      this._realtimeUnsubscribe = window.nocDB.subscribeToRealtimeRecords(async (eventData) => {
+        console.log(`⚡ [NOCApp Realtime] Event: ${eventData.eventType}`, eventData);
+        await this.handleRealtimeEventSync(eventData);
       });
     }
 
@@ -2968,26 +2980,55 @@ trailer
     }
   }
 
+  cleanupRealtime() {
+    if (this._realtimeUnsubscribe) {
+      try { this._realtimeUnsubscribe(); } catch (e) {}
+      this._realtimeUnsubscribe = null;
+    }
+    if (window.nocDB && typeof window.nocDB.unsubscribeRealtime === 'function') {
+      window.nocDB.unsubscribeRealtime();
+    }
+  }
+
   /**
    * Handle real-time database synchronizations across multiple browsers
    * - Triggered automatically on INSERT, UPDATE, DELETE from any browser
-   * - Updates dashboard counters (Total, Active, Expiring, Expired)
+   * - Updates local state directly without re-fetching the full database (ZERO PostgREST egress)
+   * - Recalculates dashboard counters (Total, Active, Expiring, Expired)
    * - Re-renders active table / grid view with current filter criteria
-   * - Updates categories and contractor options
    */
-  async handleRealtimeEventSync(records, stats, payload) {
-    if (!Array.isArray(records)) return;
+  async handleRealtimeEventSync({ eventType, newRecord, oldRecord, deletedId, payload }) {
+    if (!this.allRecords) this.allRecords = [];
 
-    // 1. Update in-memory records cache with latest Supabase records (single source of truth)
-    this.allRecords = records;
-    this.allRecords.forEach(r => {
-      if (r && r.issuedTo) {
-        r.issuedTo = String(r.issuedTo).trim().toUpperCase();
+    const targetNoc = (newRecord && newRecord.nocNumber) || (oldRecord && oldRecord.noc_number) || '';
+
+    if (eventType === 'INSERT' && newRecord) {
+      const existingIdx = this.allRecords.findIndex(r => String(r.id) === String(newRecord.id) || (r.nocNumber && r.nocNumber.toLowerCase() === newRecord.nocNumber.toLowerCase()));
+      if (existingIdx >= 0) {
+        this.allRecords[existingIdx] = newRecord;
+      } else {
+        this.allRecords.unshift(newRecord);
       }
-    });
+      window.showToast(`⚡ Realtime: New NOC ${targetNoc ? '"' + targetNoc + '"' : 'record'} created in Supabase. Dashboard updated.`, 'info');
+    } else if (eventType === 'UPDATE' && newRecord) {
+      const existingIdx = this.allRecords.findIndex(r => String(r.id) === String(newRecord.id) || (r.nocNumber && r.nocNumber.toLowerCase() === newRecord.nocNumber.toLowerCase()));
+      if (existingIdx >= 0) {
+        this.allRecords[existingIdx] = { ...this.allRecords[existingIdx], ...newRecord };
+      } else {
+        this.allRecords.unshift(newRecord);
+      }
+      window.showToast(`⚡ Realtime: NOC ${targetNoc ? '"' + targetNoc + '"' : 'record'} updated in Supabase. Dashboard updated.`, 'info');
+    } else if (eventType === 'DELETE') {
+      const delTarget = String(deletedId || (oldRecord && (oldRecord.id || oldRecord.noc_number)));
+      if (delTarget) {
+        this.allRecords = this.allRecords.filter(r => String(r.id) !== delTarget && String(r.nocNumber) !== delTarget);
+      }
+      window.showToast(`⚡ Realtime: NOC ${targetNoc ? '"' + targetNoc + '"' : 'record'} removed from Supabase. Dashboard updated.`, 'info');
+    }
 
     // 2. Automatically recalculate & render Total NOC Records, Active Permits, Expiring Soon, and Expired Permits
-    if (stats && window.nocUI && typeof window.nocUI.renderStats === 'function') {
+    const stats = await window.nocDB.getStatistics(this.allRecords);
+    if (window.nocUI && typeof window.nocUI.renderStats === 'function') {
       window.nocUI.renderStats(stats);
     }
 
@@ -2999,20 +3040,6 @@ trailer
 
     // 5. If user currently has a view/edit modal open for an affected record, synchronize modal state
     this.handleRealtimeModalSync(payload);
-
-    // 6. Display a sleek toast notification indicating automatic synchronization
-    const eventType = payload ? payload.eventType : '';
-    const newRecord = payload ? payload.new : null;
-    const oldRecord = payload ? payload.old : null;
-    const targetNoc = (newRecord && newRecord.noc_number) || (oldRecord && oldRecord.noc_number) || '';
-
-    if (eventType === 'INSERT') {
-      window.showToast(`⚡ Realtime: New NOC ${targetNoc ? '"' + targetNoc + '"' : 'record'} created in Supabase. Dashboard updated.`, 'info');
-    } else if (eventType === 'UPDATE') {
-      window.showToast(`⚡ Realtime: NOC ${targetNoc ? '"' + targetNoc + '"' : 'record'} updated in Supabase. Dashboard updated.`, 'info');
-    } else if (eventType === 'DELETE') {
-      window.showToast(`⚡ Realtime: NOC ${targetNoc ? '"' + targetNoc + '"' : 'record'} removed from Supabase. Dashboard updated.`, 'info');
-    }
   }
 
   /**

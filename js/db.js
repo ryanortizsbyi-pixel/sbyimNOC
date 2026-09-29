@@ -154,12 +154,15 @@ class NOCDatabase {
       localStorage.removeItem('noc_records');
     } catch (e) {}
 
-    // 3. Delete from Supabase if connected
-    if (this.isSupabaseActive()) {
+    // 3. Delete from Supabase if connected (only once per client session to prevent startup egress)
+    const CLOUD_PURGE_KEY = 'noc_records_purged_cloud_v7';
+    if (this.isSupabaseActive() && !localStorage.getItem(CLOUD_PURGE_KEY)) {
       try {
+        console.log('[Supabase] Running one-time legacy demo data purge');
         const client = this.getSupabaseClient();
         await client.from('noc_records').delete().in('id', demoIds);
         await client.from('noc_records').delete().in('noc_number', demoNocNumbers);
+        localStorage.setItem(CLOUD_PURGE_KEY, 'true');
       } catch (e) {
         console.warn('Supabase demo data purge note:', e);
       }
@@ -465,10 +468,10 @@ class NOCDatabase {
   async getAll() {
     if (this.isSupabaseActive()) {
       try {
-        const client = this.getSupabaseClient();
+        console.log('[Supabase] Fetching NOC records (lightweight metadata)');
         const { data, error } = await client
           .from('noc_records')
-          .select('*')
+          .select('id, noc_number, noc_type, client, issued_to, company_code, date_of_issuance, date_of_expiration, description, created_at, updated_at')
           .order('created_at', { ascending: false })
           .limit(5000);
 
@@ -564,17 +567,28 @@ class NOCDatabase {
         console.log(`⚡ [Realtime Event: noc_records] Action: ${payload.eventType}`, payload);
 
         try {
-          // Requirement: "After every realtime database event, fetch the latest NOC records from Supabase."
-          // Requirement: "Supabase must remain the single source of truth."
-          const freshRecords = await this.getAll();
+          const eventType = payload.eventType;
+          let newRecord = null;
+          let oldRecord = payload.old || null;
+          let deletedId = null;
 
-          // Requirement: "Automatically recalculate Total NOC Records, Active Permits, Expiring Soon, and Expired Permits."
-          const freshStats = await this.getStatistics(freshRecords);
+          if (eventType === 'INSERT' && payload.new) {
+            newRecord = this.mapDbToRecord(payload.new);
+            await this._localPut(newRecord).catch(() => {});
+          } else if (eventType === 'UPDATE' && payload.new) {
+            newRecord = this.mapDbToRecord(payload.new);
+            await this._localPut(newRecord).catch(() => {});
+          } else if (eventType === 'DELETE' && payload.old) {
+            deletedId = payload.old.id || payload.old.noc_number;
+            if (deletedId) {
+              await this._localDelete(deletedId).catch(() => {});
+            }
+          }
 
-          // Invoke all registered callbacks
+          // Invoke all registered callbacks with targeted event payload (ZERO full-table refetch needed)
           for (const listener of this._realtimeListeners) {
             try {
-              listener({ records: freshRecords, stats: freshStats, payload });
+              listener({ eventType, newRecord, oldRecord, deletedId, payload });
             } catch (err) {
               console.error('Error in realtime listener callback:', err);
             }
@@ -582,10 +596,10 @@ class NOCDatabase {
 
           // Broadcast window event
           window.dispatchEvent(new CustomEvent('noc:realtime-records-change', {
-            detail: { records: freshRecords, stats: freshStats, payload }
+            detail: { eventType, newRecord, oldRecord, deletedId, payload }
           }));
-        } catch (fetchErr) {
-          console.error('Failed to fetch fresh records after realtime event:', fetchErr);
+        } catch (eventErr) {
+          console.error('Failed to process realtime event:', eventErr);
         }
       },
       (status, err) => {
@@ -622,6 +636,7 @@ class NOCDatabase {
   async getById(id) {
     if (this.isSupabaseActive()) {
       try {
+        console.log(`[Supabase] Fetching single NOC record with full documents (id: ${id})`);
         const client = this.getSupabaseClient();
         const { data, error } = await client
           .from('noc_records')
@@ -664,6 +679,7 @@ class NOCDatabase {
 
     if (this.isSupabaseActive()) {
       try {
+        console.log(`[Supabase] Checking single NOC record by number (nocNumber: ${cleanNum})`);
         const client = this.getSupabaseClient();
         const { data, error } = await client
           .from('noc_records')
@@ -717,6 +733,7 @@ class NOCDatabase {
 
     if (this.isSupabaseActive()) {
       try {
+        console.log(`[Supabase] Inserting new NOC record (nocNumber: ${newRecord.nocNumber})`);
         const client = this.getSupabaseClient();
         const dbPayload = this.mapRecordToDb(newRecord);
         const { data, error } = await client
@@ -787,6 +804,7 @@ class NOCDatabase {
 
     if (this.isSupabaseActive()) {
       try {
+        console.log(`[Supabase] Updating NOC record (id: ${id})`);
         const client = this.getSupabaseClient();
         const dbPayload = this.mapRecordToDb(mergedRecord);
         const { data, error } = await client
@@ -859,6 +877,7 @@ class NOCDatabase {
     // 2. Permanently delete from Supabase PostgreSQL cloud database if active
     if (this.isSupabaseActive()) {
       try {
+        console.log(`[Supabase] Deleting NOC record (id: ${id})`);
         const client = this.getSupabaseClient();
         if (client) {
           // A. Delete by exact ID (string)
@@ -942,6 +961,7 @@ class NOCDatabase {
 
     if (this.isSupabaseActive()) {
       try {
+        console.log(`[Supabase] Bulk deleting NOC records (count: ${ids.length})`);
         const client = this.getSupabaseClient();
         if (client) {
           // Delete by IDs
@@ -1053,6 +1073,7 @@ class NOCDatabase {
 
     if (this.isSupabaseActive()) {
       try {
+        console.log('[Supabase] Fetching requirements documents metadata');
         const client = this.getSupabaseClient();
         const { data, error } = await client
           .from('noc_requirements_docs')
@@ -1271,6 +1292,7 @@ class NOCDatabase {
 
     if (this.isSupabaseActive()) {
       try {
+        console.log('[Supabase] Fetching SBYI COC documents metadata');
         const client = this.getSupabaseClient();
         const { data, error } = await client
           .from('sbyi_coc_docs')
@@ -1491,6 +1513,7 @@ class NOCDatabase {
 
     if (this.isSupabaseActive()) {
       try {
+        console.log('[Supabase] Fetching AI knowledge base documents metadata');
         const client = this.getSupabaseClient();
         const { data, error } = await client
           .from('ai_documents')
@@ -1707,6 +1730,7 @@ class NOCDatabase {
   async getCustomTypes() {
     if (this.isSupabaseActive()) {
       try {
+        console.log('[Supabase] Fetching custom NOC types');
         const client = this.getSupabaseClient();
         const { data, error } = await client
           .from('noc_custom_types')
@@ -1773,6 +1797,7 @@ class NOCDatabase {
   async getCustomContractors() {
     if (this.isSupabaseActive()) {
       try {
+        console.log('[Supabase] Fetching custom contractors list');
         const client = this.getSupabaseClient();
         const { data, error } = await client
           .from('noc_custom_contractors')
