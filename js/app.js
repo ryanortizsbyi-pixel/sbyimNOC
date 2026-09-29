@@ -24,12 +24,22 @@ class NOCApp {
     // 1. Immediately initialize UI in the unauthenticated landing state
     window.nocUI.init();
 
-    // 2. Await database initialization and automatic Supabase cloud connection
+    // 2. Immediately bind all DOM events and modal handlers so the UI is 100% responsive right away
+    this.bindEvents();
+    this.populateTypeFilterOptions();
+    this.populateFormTypeOptions('');
+    this.populateFormContractorOptions('');
+
+    // 3. Await database initialization (non-blocking for UI interactions)
     if (window.nocDB && window.nocDB.initPromise) {
-      await window.nocDB.initPromise;
+      try {
+        await window.nocDB.initPromise;
+      } catch (err) {
+        console.warn('Database init note:', err);
+      }
     }
 
-    // 2.1 Set default sort and initial search query for active user
+    // 4. Set default sort and initial search query for active user
     const isSBYIM = window.nocAuth && window.nocAuth.isSBYIM();
     const isSecurity = window.nocAuth && window.nocAuth.isSecurity();
     const isEmployee = window.nocAuth && (window.nocAuth.isEmployee ? window.nocAuth.isEmployee() : window.nocAuth.isMain());
@@ -56,19 +66,24 @@ class NOCApp {
       this.searchQuery = '';
     }
 
-    // 3. Seed initial realistic database if empty
-    await window.seedInitialDatabaseIfEmpty();
+    // 5. Seed initial realistic database if empty (run asynchronously without blocking)
+    try {
+      await window.seedInitialDatabaseIfEmpty();
+    } catch (err) {
+      console.warn('Seed database note:', err);
+    }
 
-    // 4. Load all records from active database (Supabase Cloud or Local fallback)
-    await this.refreshData();
+    // 6. Load all records from active database (Supabase Cloud or Local fallback)
+    try {
+      await this.refreshData();
+    } catch (err) {
+      console.warn('Initial data refresh note:', err);
+    }
 
-    // 5. Bind event listeners & populate type filters and form options
-    this.bindEvents();
+    // 7. Re-populate type filters and contractor dropdowns after data loaded
     this.populateTypeFilterOptions();
-    this.populateFormTypeOptions('');
-    this.populateFormContractorOptions('');
 
-    // 6. Initialize SBYIM AI Assistant UI and sync Approved Documents Knowledge Base
+    // 8. Initialize SBYIM AI Assistant UI and sync Approved Documents Knowledge Base
     if (window.sbyimAIUI) {
       window.sbyimAIUI.init();
     }
@@ -1213,35 +1228,58 @@ class NOCApp {
     if (loginForm) {
       loginForm.addEventListener('submit', (e) => {
         e.preventDefault();
-        const u = document.getElementById('loginUsername').value;
-        const p = document.getElementById('loginPassword').value;
+        const submitBtn = document.getElementById('btnSubmitLogin');
+        const usernameInput = document.getElementById('loginUsername');
+        const passwordInput = document.getElementById('loginPassword');
+        const u = usernameInput ? usernameInput.value : '';
+        const p = passwordInput ? passwordInput.value : '';
         const rememberMe = !!(document.getElementById('loginRememberMe') && document.getElementById('loginRememberMe').checked);
-        const res = window.nocAuth.login(u, p, rememberMe);
-        if (res.success) {
-          window.nocUI.closeLoginModal(true);
-          const isGuestUser = res.user.role === 'guest';
-          const isMainUser = res.user.role === 'main' || res.user.role === 'employee';
-          const isSecurityUser = res.user.role === 'security';
-          const isSBYIMUser = res.user.username.toLowerCase() === 'sbyim';
 
-          if (isGuestUser || isSecurityUser || isSBYIMUser || isMainUser) {
-            this.sortBy = 'issuance';
-            const filterSort = document.getElementById('filterSort');
-            if (filterSort) filterSort.value = 'issuance';
-          }
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.innerHTML = '<span>⏳ Signing In...</span>';
+        }
 
-          this.currentPage = 1;
-          const isAutoSearch = isGuestUser;
-          const queryVal = isAutoSearch ? res.user.username : '';
-          const searchInput = document.getElementById('searchInput');
-          if (searchInput) {
-            searchInput.value = queryVal;
+        try {
+          const res = window.nocAuth.login(u, p, rememberMe);
+          if (res.success) {
+            window.nocUI.closeLoginModal(true);
+            const isGuestUser = res.user.role === 'guest';
+            const isMainUser = res.user.role === 'main' || res.user.role === 'employee';
+            const isSecurityUser = res.user.role === 'security';
+            const isSBYIMUser = res.user.username.toLowerCase() === 'sbyim';
+
+            if (isGuestUser || isSecurityUser || isSBYIMUser || isMainUser) {
+              this.sortBy = 'issuance';
+              const filterSort = document.getElementById('filterSort');
+              if (filterSort) filterSort.value = 'issuance';
+            }
+
+            this.currentPage = 1;
+            const isAutoSearch = isGuestUser;
+            const queryVal = isAutoSearch ? res.user.username : '';
+            const searchInput = document.getElementById('searchInput');
+            if (searchInput) {
+              searchInput.value = queryVal;
+            }
+            this.searchQuery = queryVal;
+            this.applyFilters();
+            window.showToast(`Logged in successfully as "${res.user.username}" (${res.user.role.toUpperCase()}).` + (isAutoSearch ? ` Searching corresponding data files for "${res.user.username}" (Sorted by Issuance Date)...` : ((isSecurityUser || isMainUser || isSBYIMUser) ? ' Sorted by Issuance Date.' : '')), 'success');
+          } else {
+            window.showToast(res.message, 'error');
+            if (passwordInput) {
+              passwordInput.value = '';
+              passwordInput.focus();
+            }
           }
-          this.searchQuery = queryVal;
-          this.applyFilters();
-          window.showToast(`Logged in successfully as "${res.user.username}" (${res.user.role.toUpperCase()}).` + (isAutoSearch ? ` Searching corresponding data files for "${res.user.username}" (Sorted by Issuance Date)...` : ((isSecurityUser || isMainUser || isSBYIMUser) ? ' Sorted by Issuance Date.' : '')), 'success');
-        } else {
-          window.showToast(res.message, 'error');
+        } catch (err) {
+          console.error('Login submit error:', err);
+          window.showToast('Login failed: ' + err.message, 'error');
+        } finally {
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<span>🛡️ Sign In</span>';
+          }
         }
       });
     }
@@ -2086,6 +2124,18 @@ class NOCApp {
         }
       });
     }
+
+    // Listen to Supabase connection events for auto-sync and refresh
+    window.addEventListener('noc:supabase-config-change', async (e) => {
+      if (e.detail && e.detail.isConnected) {
+        try {
+          await this.refreshData();
+          this.populateTypeFilterOptions();
+        } catch (err) {
+          console.warn('Auto refresh on Supabase connect note:', err);
+        }
+      }
+    });
 
     // Setup User Database Listeners (Admin Only)
     this.setupUserDatabaseListeners();

@@ -1,6 +1,6 @@
 /**
  * NOC Portal - Supabase Client & Configuration Manager
- * Initializes the Supabase JS Client with localStorage persistence and live status checking.
+ * Initializes the Supabase JS Client with automatic connection, live status checking, and auto-reconnect.
  */
 
 class SupabaseConfigManager {
@@ -8,19 +8,30 @@ class SupabaseConfigManager {
     this.STORAGE_KEY_URL = 'noc_supabase_url';
     this.STORAGE_KEY_KEY = 'noc_supabase_anon_key';
     
-    // Default Supabase connection disconnected (Running in Local Mode)
-    this.defaultUrl = '';
-    this.defaultAnonKey = '';
+    // Default Supabase connection credentials (Production Project)
+    this.defaultUrl = 'https://skidfzyisurdkzsmcpwe.supabase.co';
+    this.defaultAnonKey = 'sb_publishable_IKBla9qx0bETi1Fs4GJG5g_8fikmi3q';
     
     this.client = null;
     this.isConnected = false;
+    this.isConnecting = false;
     this.lastChecked = null;
+    this._connectionPromise = null;
+    this._retryTimer = null;
+    this._heartbeatTimer = null;
 
+    // Initialize client instance immediately
     this.initClient();
+
+    // Auto-connect immediately in background
+    this.autoConnect();
+
+    // Setup network and lifecycle event listeners for automatic reconnection
+    this.setupAutoReconnect();
   }
 
   /**
-   * Get configured Supabase URL
+   * Get configured Supabase URL (defaults to production project URL)
    */
   getUrl() {
     try {
@@ -31,11 +42,11 @@ class SupabaseConfigManager {
     } catch (e) {
       console.warn('Could not read Supabase URL from localStorage', e);
     }
-    return '';
+    return this.defaultUrl;
   }
 
   /**
-   * Get configured Supabase Anon Key
+   * Get configured Supabase Anon Key (defaults to production anon key)
    */
   getAnonKey() {
     try {
@@ -46,11 +57,11 @@ class SupabaseConfigManager {
     } catch (e) {
       console.warn('Could not read Supabase Anon Key from localStorage', e);
     }
-    return '';
+    return this.defaultAnonKey;
   }
 
   /**
-   * Save new Supabase credentials and re-initialize client
+   * Save new Supabase credentials, re-initialize client, and auto-connect
    */
   saveCredentials(url, anonKey) {
     const trimmedUrl = (url || '').trim();
@@ -60,13 +71,13 @@ class SupabaseConfigManager {
       if (trimmedUrl) {
         localStorage.setItem(this.STORAGE_KEY_URL, trimmedUrl);
       } else {
-        localStorage.setItem(this.STORAGE_KEY_URL, '');
+        localStorage.removeItem(this.STORAGE_KEY_URL);
       }
 
       if (trimmedKey) {
         localStorage.setItem(this.STORAGE_KEY_KEY, trimmedKey);
       } else {
-        localStorage.setItem(this.STORAGE_KEY_KEY, '');
+        localStorage.removeItem(this.STORAGE_KEY_KEY);
       }
     } catch (e) {
       console.error('Error saving Supabase credentials:', e);
@@ -74,25 +85,26 @@ class SupabaseConfigManager {
 
     this.initClient();
     this.triggerConfigChange();
+    return this.testConnection();
   }
 
   /**
-   * Clear Supabase credentials (revert to local mode)
+   * Reset / revert Supabase credentials to default production settings
    */
   clearCredentials() {
     try {
       localStorage.removeItem(this.STORAGE_KEY_URL);
       localStorage.removeItem(this.STORAGE_KEY_KEY);
     } catch (e) {
-      console.error('Error clearing Supabase credentials:', e);
+      console.error('Error resetting Supabase credentials:', e);
     }
-    this.client = null;
-    this.isConnected = false;
+    this.initClient();
     this.triggerConfigChange();
+    return this.testConnection();
   }
 
   /**
-   * Initialize Supabase Client if credentials are valid and Supabase JS SDK is loaded
+   * Initialize Supabase Client if credentials and SDK are available
    */
   initClient() {
     const url = this.getUrl();
@@ -103,10 +115,12 @@ class SupabaseConfigManager {
         this.client = window.supabase.createClient(url, key, {
           auth: {
             persistSession: true,
-            autoRefreshToken: true
+            autoRefreshToken: true,
+            detectSessionInUrl: false
           }
         });
-        console.log('Supabase client initialized with URL:', url);
+        console.log('⚡ Supabase client initialized with URL:', url);
+        return this.client;
       } catch (err) {
         console.error('Failed to initialize Supabase client:', err);
         this.client = null;
@@ -114,19 +128,20 @@ class SupabaseConfigManager {
     } else {
       this.client = null;
     }
+    return this.client;
   }
 
   /**
-   * Check if Supabase client is configured
+   * Check if Supabase client credentials are configured
    */
   isConfigured() {
     const url = this.getUrl();
     const key = this.getAnonKey();
-    return Boolean(url && key && this.client);
+    return Boolean(url && key);
   }
 
   /**
-   * Get current Supabase client instance
+   * Get current Supabase client instance (auto-initializes if not ready)
    */
   getClient() {
     if (!this.client && this.isConfigured()) {
@@ -136,7 +151,77 @@ class SupabaseConfigManager {
   }
 
   /**
-   * Test connection to Supabase database (health check)
+   * Automatic background connection handler with self-healing retry
+   */
+  autoConnect() {
+    if (this._connectionPromise && this.isConnecting) {
+      return this._connectionPromise;
+    }
+
+    this._connectionPromise = (async () => {
+      this.isConnecting = true;
+      try {
+        // If window.supabase SDK is not ready yet, wait briefly
+        if (!window.supabase || typeof window.supabase.createClient !== 'function') {
+          await new Promise(resolve => setTimeout(resolve, 150));
+        }
+
+        const result = await this.testConnection();
+        if (result.success) {
+          if (this._retryTimer) {
+            clearTimeout(this._retryTimer);
+            this._retryTimer = null;
+          }
+        } else {
+          // Schedule background retry after 3 seconds if initial load / network issue
+          if (!this._retryTimer) {
+            this._retryTimer = setTimeout(() => {
+              this._retryTimer = null;
+              this.autoConnect();
+            }, 3000);
+          }
+        }
+        return result;
+      } catch (err) {
+        console.warn('Auto-connect attempt note:', err);
+        return { success: false, error: err.message };
+      } finally {
+        this.isConnecting = false;
+      }
+    })();
+
+    return this._connectionPromise;
+  }
+
+  /**
+   * Setup auto-reconnect event listeners
+   */
+  setupAutoReconnect() {
+    // Re-verify when device comes online
+    window.addEventListener('online', () => {
+      console.log('🌐 Network online detected: Reconnecting to Supabase...');
+      this.autoConnect();
+    });
+
+    // Re-verify when user returns to tab
+    window.addEventListener('focus', () => {
+      if (!this.isConnected) {
+        this.autoConnect();
+      }
+    });
+
+    // Setup periodic keep-alive / health check every 45 seconds
+    if (!this._heartbeatTimer) {
+      this._heartbeatTimer = setInterval(() => {
+        if (navigator.onLine !== false) {
+          this.testConnection().catch(() => {});
+        }
+      }, 45000);
+    }
+  }
+
+  /**
+   * Test connection to Supabase database (health check) with timeout protection
    */
   async testConnection() {
     const url = this.getUrl();
@@ -144,6 +229,7 @@ class SupabaseConfigManager {
 
     if (!url || !key) {
       this.isConnected = false;
+      this.triggerConfigChange();
       return {
         success: false,
         message: 'Supabase URL or Anon Key is missing. Running in Local Storage mode.'
@@ -152,6 +238,7 @@ class SupabaseConfigManager {
 
     if (!window.supabase || typeof window.supabase.createClient !== 'function') {
       this.isConnected = false;
+      this.triggerConfigChange();
       return {
         success: false,
         message: 'Supabase JS SDK is not loaded. Please check your internet connection.'
@@ -159,25 +246,33 @@ class SupabaseConfigManager {
     }
 
     try {
-      const testClient = window.supabase.createClient(url, key);
-      // Query noc_records table (limit 1) to test table access and RLS
-      const { data, error } = await testClient
+      const activeClient = this.getClient() || window.supabase.createClient(url, key);
+      this.client = activeClient;
+
+      // Query noc_records table (limit 1) to test table access and RLS with 4-second timeout
+      const queryPromise = activeClient
         .from('noc_records')
         .select('id')
         .limit(1);
 
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Connection check timed out after 4 seconds')), 4000)
+      );
+
+      const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
+
       if (error) {
         this.isConnected = false;
-        console.warn('Supabase connection test failed:', error);
+        console.warn('Supabase connection test note:', error);
+        this.triggerConfigChange();
         return {
           success: false,
           error: error.message || 'Database query error',
-          message: `Connection failed: ${error.message}. Make sure you executed the SQL Schema in Supabase SQL Editor.`
+          message: `Connection test note: ${error.message}. Ensure schema is applied in Supabase.`
         };
       }
 
       this.isConnected = true;
-      this.client = testClient;
       this.lastChecked = new Date();
       this.triggerConfigChange();
 
@@ -187,6 +282,7 @@ class SupabaseConfigManager {
       };
     } catch (err) {
       this.isConnected = false;
+      this.triggerConfigChange();
       return {
         success: false,
         error: err.message,
@@ -196,7 +292,7 @@ class SupabaseConfigManager {
   }
 
   /**
-   * Dispatch custom event when configuration changes
+   * Dispatch custom event when configuration or connection state changes
    */
   triggerConfigChange() {
     window.dispatchEvent(new CustomEvent('noc:supabase-config-change', {

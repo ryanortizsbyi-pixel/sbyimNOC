@@ -300,15 +300,15 @@ async function restoreAllData(forceRestore = false) {
       stats.users = users.length;
     }
 
-    // 8. If Supabase is active, push and synchronize all collections immediately
-    if (window.nocDB && window.nocDB.isSupabaseActive()) {
+    // 8. If force restore and Supabase is active, push and synchronize all collections immediately
+    if (forceRestore && window.nocDB && window.nocDB.isSupabaseActive()) {
       try {
         const syncStats = await window.nocDB.syncLocalToSupabase();
         stats.supabaseSynced = true;
         stats.syncStats = syncStats;
         console.log('Restoration pushed directly to Supabase cloud PostgreSQL:', syncStats);
       } catch (err) {
-        console.warn('Supabase cloud push during restore failed:', err.message);
+        console.warn('Supabase cloud push during restore note:', err.message);
       }
     }
 
@@ -331,29 +331,13 @@ async function restoreAllData(forceRestore = false) {
  */
 async function seedInitialDatabaseIfEmpty() {
   try {
-    const isSupabase = window.nocDB && window.nocDB.isSupabaseActive();
-    
     // Purge legacy demo records and initial dataset purge
     if (window.nocDB && window.nocDB.purgeLegacyDemoData) {
       await window.nocDB.purgeLegacyDemoData();
     }
     
-    // Ensure all core collections (requirements, COC docs, contractors, types, users) are populated
+    // Ensure all core collections (requirements, COC docs, contractors, types, users) are populated locally
     await restoreAllData(false);
-
-    // If Supabase is active, ensure cloud database is synced
-    if (isSupabase) {
-      try {
-        const client = window.nocDB.getSupabaseClient();
-        const { data, error } = await client.from('noc_records').select('id').limit(1);
-        if (!error && (!data || data.length === 0)) {
-          console.log('Supabase database table checked. Syncing local dataset to Supabase...');
-          await window.nocDB.syncLocalToSupabase();
-        }
-      } catch (err) {
-        console.warn('Supabase auto-sync check note:', err);
-      }
-    }
   } catch (err) {
     console.error('Seed data initialization error:', err);
   }

@@ -474,6 +474,7 @@ class UIManager {
     this.closeDatabaseModal();
     this.closeUserDatabaseModal();
     this.closeUserEditModal();
+    this.closeLoginModal(true);
     if (window.docViewer) {
       window.docViewer.close();
     }
@@ -1570,9 +1571,15 @@ class UIManager {
     const form = document.getElementById('loginForm');
     const closeBtn = document.getElementById('btnCloseLoginModal');
     const usernameInput = document.getElementById('loginUsername');
+    const passwordInput = document.getElementById('loginPassword');
     const rememberMeCheckbox = document.getElementById('loginRememberMe');
+    const submitBtn = document.getElementById('btnSubmitLogin');
 
     if (form) form.reset();
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<span>🛡️ Sign In</span>';
+    }
     this.resetPasswordInputState('loginPassword', 'btnToggleLoginPassword', 'Show password');
 
     // Prepopulate remembered username and checkbox state if previously saved
@@ -1604,6 +1611,14 @@ class UIManager {
       closeBtn.style.display = 'inline-flex';
     }
     if (modal) modal.classList.add('active');
+
+    setTimeout(() => {
+      if (usernameInput && !usernameInput.value) {
+        usernameInput.focus();
+      } else if (passwordInput) {
+        passwordInput.focus();
+      }
+    }, 80);
   }
 
   /**
@@ -1611,7 +1626,15 @@ class UIManager {
    */
   closeLoginModal(force = false) {
     const modal = document.getElementById('loginModal');
+    const submitBtn = document.getElementById('btnSubmitLogin');
     if (modal) modal.classList.remove('active');
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<span>🛡️ Sign In</span>';
+    }
+    if (document.activeElement && modal && modal.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
   }
 
   /**
@@ -2221,8 +2244,24 @@ CREATE POLICY "Allow all operations on noc_settings" ON public.noc_settings FOR 
 DROP POLICY IF EXISTS "Allow all operations on noc_users" ON public.noc_users;
 CREATE POLICY "Allow all operations on noc_users" ON public.noc_users FOR ALL TO public USING (true) WITH CHECK (true);
 
--- 10. DEFAULT CATEGORIES, CONTRACTORS, RECORDS & SEED USERS
-INSERT INTO public.noc_custom_types (name) VALUES ('Activity'), ('Activity NOC') ON CONFLICT (name) DO NOTHING;
+-- 11. DEFAULT CATEGORIES, CONTRACTORS, SETTINGS & SEED USERS
+INSERT INTO public.noc_custom_types (name)
+VALUES 
+    ('Activity'),
+    ('Activity NOC'),
+    ('Berthing NOC'),
+    ('Construction Camp Site Approval'),
+    ('Construction Camp Size & Location Approval'),
+    ('Construction NOC'),
+    ('Design and Build NOC'),
+    ('Maintenance Activity'),
+    ('Maintenance NOC'),
+    ('Marine Survey NOC'),
+    ('O&M NOC'),
+    ('Operation & Maintenance NOC'),
+    ('Site Visit & Meeting'),
+    ('Temporary Occupancy Certificate')
+ON CONFLICT (name) DO NOTHING;
 
 INSERT INTO public.noc_custom_contractors (name)
 VALUES
@@ -2235,6 +2274,12 @@ VALUES
     ('ARABTEC CONSTRUCTION'),
     ('SIX CONSTRUCT')
 ON CONFLICT (name) DO NOTHING;
+
+INSERT INTO public.noc_settings (key, value)
+VALUES
+    ('noc_contractor_renames', '{}'::jsonb),
+    ('portal_config', '{"autoSync": true, "theme": "light"}'::jsonb)
+ON CONFLICT (key) DO NOTHING;
 
 INSERT INTO public.noc_users (username, password, role, display_name, email)
 VALUES

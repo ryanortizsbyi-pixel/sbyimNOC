@@ -91,29 +91,20 @@ class NOCDatabase {
       try {
         const status = await window.supabaseManager.testConnection();
         if (status.success) {
-          console.log('NOCDatabase: Connected to Supabase PostgreSQL database.');
-          // Also purge records from Supabase cloud table if purge key was active
-          const PURGE_KEY = 'noc_records_purged_clear_all_v5';
-          if (!localStorage.getItem(PURGE_KEY + '_supabase')) {
-            const client = this.getSupabaseClient();
-            if (client) {
-              await client.from('noc_records').delete().neq('id', '___none___').catch(() => {});
-              localStorage.setItem(PURGE_KEY + '_supabase', 'true');
-            }
-          }
+          console.log('⚡ NOCDatabase: Connected to Supabase PostgreSQL database.');
         } else {
-          console.warn('NOCDatabase: Supabase credentials found but connection test failed. Using local storage.', status.message);
+          console.warn('NOCDatabase: Supabase connection note:', status.message);
         }
       } catch (e) {
         console.warn('NOCDatabase: Supabase test connection error:', e);
       }
     } else {
-      console.log('NOCDatabase: Supabase not configured yet. Operating in Local Persistent mode.');
+      console.log('NOCDatabase: Supabase not configured. Operating in Local Persistent mode.');
     }
   }
 
   /**
-   * Permanently purge legacy demo/sample NOC records from IndexedDB, localStorage and Supabase
+   * Permanently purge legacy demo/sample NOC records from IndexedDB and localStorage
    */
   async purgeLegacyDemoData() {
     const PURGE_KEY = 'noc_records_purged_clear_all_v5';
@@ -149,9 +140,6 @@ class NOCDatabase {
         const client = this.getSupabaseClient();
         await client.from('noc_records').delete().in('id', demoIds);
         await client.from('noc_records').delete().in('noc_number', demoNocNumbers);
-        if (!isPurged) {
-          await client.from('noc_records').delete().neq('id', '___none___');
-        }
       } catch (e) {
         console.warn('Supabase demo data purge note:', e);
       }
@@ -1900,10 +1888,16 @@ class NOCDatabase {
     if (this.isSupabaseActive()) {
       try {
         const client = this.getSupabaseClient();
-        const { data, error } = await client
+        const fetchPromise = client
           .from('noc_users')
           .select('*')
           .order('username', { ascending: true });
+        
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Supabase getUsers query timeout')), 2500)
+        );
+
+        const { data, error } = await Promise.race([fetchPromise, timeoutPromise]);
 
         if (error) throw error;
         if (data && data.length > 0) {
@@ -1914,7 +1908,7 @@ class NOCDatabase {
           return users;
         }
       } catch (err) {
-        console.warn('Supabase getUsers failed, reading local:', err.message);
+        console.warn('Supabase getUsers note (using local cache):', err.message);
       }
     }
 
