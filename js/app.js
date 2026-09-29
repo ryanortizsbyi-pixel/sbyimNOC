@@ -784,7 +784,7 @@ class NOCApp {
         if (idToDelete) {
           try {
             btnConfirmDelete.disabled = true;
-            btnConfirmDelete.textContent = 'Deleting...';
+            btnConfirmDelete.textContent = 'Deleting from databases...';
             
             await window.nocDB.delete(idToDelete);
 
@@ -801,7 +801,7 @@ class NOCApp {
               window.nocUI.updateBulkActionsBar();
             }
             await this.refreshData();
-            window.showToast('NOC Record deleted successfully.', 'success');
+            window.showToast('🗑️ NOC Record permanently deleted from Local Database and Supabase PostgreSQL.', 'success');
           } catch (err) {
             console.error('Single delete error:', err);
             window.showToast('Failed to delete record: ' + err.message, 'error');

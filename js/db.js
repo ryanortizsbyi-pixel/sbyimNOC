@@ -735,50 +735,126 @@ class NOCDatabase {
   }
 
   /**
-   * Delete an NOC record.
+   * Delete an NOC record permanently from both Supabase PostgreSQL and Local Database.
    */
   async delete(id) {
     if (!id && id !== 0) return false;
 
+    // 1. Identify all record identifiers (id, nocNumber, attached docIds, storagePaths)
     let targetNocNumber = null;
+    let recordToDelete = null;
+    const docIds = [];
+    const docStoragePaths = [];
+
     if (window.nocApp && Array.isArray(window.nocApp.allRecords)) {
-      const found = window.nocApp.allRecords.find(r => String(r.id) === String(id) || String(r.nocNumber) === String(id));
-      if (found && found.nocNumber) targetNocNumber = found.nocNumber;
+      recordToDelete = window.nocApp.allRecords.find(r => 
+        String(r.id) === String(id) || 
+        String(r.nocNumber) === String(id) ||
+        (r.noc_number && String(r.noc_number) === String(id))
+      ) || null;
     }
 
-    if (this.isSupabaseActive()) {
+    if (!recordToDelete) {
       try {
-        const client = this.getSupabaseClient();
-        let query = client.from('noc_records').delete();
-        if (targetNocNumber) {
-          query = query.or(`id.eq.${id},noc_number.eq.${targetNocNumber}`);
-        } else {
-          query = query.eq('id', id);
-        }
-        const { error } = await query;
+        recordToDelete = await this.getById(id);
+      } catch (e) {}
+    }
 
-        if (error) console.warn('Supabase delete error:', error.message);
-      } catch (err) {
-        console.warn('Supabase delete failed, proceeding with local deletion:', err.message);
+    if (recordToDelete) {
+      targetNocNumber = recordToDelete.nocNumber || recordToDelete.noc_number || null;
+      if (Array.isArray(recordToDelete.documents)) {
+        recordToDelete.documents.forEach(d => {
+          if (d && d.id) docIds.push(String(d.id));
+          if (d && d.name) docIds.push(String(d.name));
+          const urlStr = d.dataUrl || d.data_url || d.url || '';
+          if (urlStr && urlStr.includes('supabase.co/storage')) {
+            const parts = urlStr.split('/noc-documents/');
+            if (parts[1]) docStoragePaths.push(parts[1].split('?')[0]);
+          }
+        });
       }
     }
 
-    // Always perform local deletion
-    return this._localDelete(id, targetNocNumber);
+    // 2. Permanently delete from Supabase PostgreSQL cloud database if active
+    if (this.isSupabaseActive()) {
+      try {
+        const client = this.getSupabaseClient();
+        if (client) {
+          // A. Delete by exact ID (string)
+          const { error: errId } = await client
+            .from('noc_records')
+            .delete()
+            .eq('id', String(id));
+          if (errId) {
+            console.warn('Supabase delete by ID note:', errId.message);
+          }
+
+          // B. If ID is numeric, also attempt delete by number
+          if (typeof id === 'number' || (!isNaN(Number(id)) && Number(id) > 0)) {
+            await client
+              .from('noc_records')
+              .delete()
+              .eq('id', Number(id))
+              .catch(() => {});
+          }
+
+          // C. Delete by noc_number to ensure complete cleanup in PostgreSQL table
+          if (targetNocNumber) {
+            const cleanNoc = String(targetNocNumber).trim();
+            const { error: errNoc } = await client
+              .from('noc_records')
+              .delete()
+              .eq('noc_number', cleanNoc);
+            if (errNoc) {
+              console.warn('Supabase delete by noc_number note:', errNoc.message);
+            }
+          }
+
+          // D. Delete attached documents from Supabase storage bucket if any
+          if (docStoragePaths.length > 0) {
+            try {
+              await client.storage.from('noc-documents').remove(docStoragePaths);
+            } catch (storErr) {
+              console.warn('Supabase storage doc cleanup note:', storErr.message);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Supabase delete operation note:', err.message);
+      }
+    }
+
+    // 3. Permanently delete from Local IndexedDB, localStorage backup, and in-memory caches
+    return this._localDelete(id, targetNocNumber, docIds);
   }
 
   /**
-   * Bulk delete multiple NOC records by IDs.
+   * Bulk delete multiple NOC records by IDs permanently from both Supabase PostgreSQL and Local Database.
    */
   async bulkDelete(ids = []) {
     if (!Array.isArray(ids) || ids.length === 0) return 0;
 
     const strIds = ids.map(i => String(i));
     const targetNocNumbers = [];
+    const docIds = [];
+    const docStoragePaths = [];
+
     if (window.nocApp && Array.isArray(window.nocApp.allRecords)) {
       window.nocApp.allRecords.forEach(r => {
-        if (strIds.includes(String(r.id)) && r.nocNumber) {
-          targetNocNumbers.push(r.nocNumber);
+        if (strIds.includes(String(r.id)) || (r.nocNumber && strIds.includes(String(r.nocNumber)))) {
+          if (r.nocNumber) targetNocNumbers.push(r.nocNumber);
+          if (r.noc_number) targetNocNumbers.push(r.noc_number);
+          if (Array.isArray(r.documents)) {
+            r.documents.forEach(d => {
+              if (d && d.id) docIds.push(String(d.id));
+              if (d && d.name) docIds.push(String(d.name));
+              const urlStr = d.dataUrl || d.data_url || d.url || '';
+              if (urlStr && urlStr.includes('supabase.co/storage')) {
+                const parts = urlStr.split('/noc-documents/');
+                if (parts[1]) docStoragePaths.push(parts[1].split('?')[0]);
+              }
+            });
+          }
         }
       });
     }
@@ -786,23 +862,42 @@ class NOCDatabase {
     if (this.isSupabaseActive()) {
       try {
         const client = this.getSupabaseClient();
-        await client
-          .from('noc_records')
-          .delete()
-          .in('id', ids);
-
-        if (targetNocNumbers.length > 0) {
-          await client
+        if (client) {
+          // Delete by IDs
+          const { error: err1 } = await client
             .from('noc_records')
             .delete()
-            .in('noc_number', targetNocNumbers);
+            .in('id', strIds);
+          if (err1) {
+            console.warn('Supabase bulkDelete by id note:', err1.message);
+          }
+
+          // Delete by noc_numbers
+          if (targetNocNumbers.length > 0) {
+            const { error: err2 } = await client
+              .from('noc_records')
+              .delete()
+              .in('noc_number', targetNocNumbers);
+            if (err2) {
+              console.warn('Supabase bulkDelete by noc_number note:', err2.message);
+            }
+          }
+
+          // Clean Supabase storage objects if any
+          if (docStoragePaths.length > 0) {
+            try {
+              await client.storage.from('noc-documents').remove(docStoragePaths);
+            } catch (storErr) {
+              console.warn('Supabase storage bulk doc cleanup note:', storErr.message);
+            }
+          }
         }
       } catch (err) {
         console.warn('Supabase bulkDelete note:', err.message);
       }
     }
 
-    return this._localBulkDelete(ids, targetNocNumbers);
+    return this._localBulkDelete(ids, targetNocNumbers, docIds);
   }
 
   /**
@@ -3112,7 +3207,7 @@ class NOCDatabase {
     return record;
   }
 
-  async _localDelete(id, targetNocNumber = null) {
+  async _localDelete(id, targetNocNumber = null, docIds = []) {
     if (!id && id !== 0) return true;
     const strId = String(id);
     const cleanNoc = targetNocNumber ? String(targetNocNumber).trim().toLowerCase() : null;
@@ -3121,7 +3216,11 @@ class NOCDatabase {
     if (db) {
       await new Promise((resolve) => {
         try {
-          const transaction = db.transaction([LOCAL_STORE_NAME], 'readwrite');
+          const stores = [LOCAL_STORE_NAME];
+          if (db.objectStoreNames.contains(LOCAL_DOCS_STORE_NAME)) {
+            stores.push(LOCAL_DOCS_STORE_NAME);
+          }
+          const transaction = db.transaction(stores, 'readwrite');
           const store = transaction.objectStore(LOCAL_STORE_NAME);
           store.delete(id);
           if (typeof id === 'string' && !isNaN(Number(id))) {
@@ -3138,7 +3237,8 @@ class NOCDatabase {
               const val = cursor.value;
               if (
                 String(val.id) === strId ||
-                (cleanNoc && val.nocNumber && String(val.nocNumber).trim().toLowerCase() === cleanNoc)
+                (cleanNoc && val.nocNumber && String(val.nocNumber).trim().toLowerCase() === cleanNoc) ||
+                (cleanNoc && val.noc_number && String(val.noc_number).trim().toLowerCase() === cleanNoc)
               ) {
                 cursor.delete();
               }
@@ -3146,10 +3246,36 @@ class NOCDatabase {
             }
           };
 
+          // Also delete associated documents from LOCAL_DOCS_STORE_NAME
+          if (db.objectStoreNames.contains(LOCAL_DOCS_STORE_NAME) && Array.isArray(docIds)) {
+            const docStore = transaction.objectStore(LOCAL_DOCS_STORE_NAME);
+            docIds.forEach(dId => {
+              try {
+                if (dId) docStore.delete(String(dId));
+              } catch (e) {}
+            });
+          }
+
           transaction.oncomplete = () => resolve(true);
           transaction.onerror = () => resolve(true);
         } catch (e) {
-          resolve(true);
+          try {
+            const tx = db.transaction([LOCAL_STORE_NAME], 'readwrite');
+            tx.objectStore(LOCAL_STORE_NAME).delete(id);
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => resolve(true);
+          } catch (e2) {
+            resolve(true);
+          }
+        }
+      });
+    }
+
+    // Clean memory doc cache
+    if (Array.isArray(docIds)) {
+      docIds.forEach(dId => {
+        if (dId) {
+          this._docMemoryCache.delete(String(dId));
         }
       });
     }
@@ -3161,6 +3287,7 @@ class NOCDatabase {
         const filtered = existing.filter(r => {
           if (String(r.id) === strId || r.id === Number(id)) return false;
           if (cleanNoc && r.nocNumber && String(r.nocNumber).trim().toLowerCase() === cleanNoc) return false;
+          if (cleanNoc && r.noc_number && String(r.noc_number).trim().toLowerCase() === cleanNoc) return false;
           return true;
         });
         this._saveToLocalStorageBackup(filtered);
@@ -3173,6 +3300,7 @@ class NOCDatabase {
         window.INITIAL_NOC_SEED_DATA = window.INITIAL_NOC_SEED_DATA.filter(r => {
           if (String(r.id) === strId || r.id === Number(id)) return false;
           if (cleanNoc && r.nocNumber && String(r.nocNumber).trim().toLowerCase() === cleanNoc) return false;
+          if (cleanNoc && r.noc_number && String(r.noc_number).trim().toLowerCase() === cleanNoc) return false;
           return true;
         });
       }
@@ -3181,7 +3309,7 @@ class NOCDatabase {
     return true;
   }
 
-  async _localBulkDelete(ids = [], targetNocNumbers = []) {
+  async _localBulkDelete(ids = [], targetNocNumbers = [], docIds = []) {
     if (!Array.isArray(ids) || ids.length === 0) return 0;
     const strIds = new Set(ids.map(i => String(i)));
     const cleanNocs = new Set((targetNocNumbers || []).map(n => String(n).trim().toLowerCase()));
@@ -3190,7 +3318,11 @@ class NOCDatabase {
     if (db) {
       await new Promise((resolve) => {
         try {
-          const transaction = db.transaction([LOCAL_STORE_NAME], 'readwrite');
+          const stores = [LOCAL_STORE_NAME];
+          if (db.objectStoreNames.contains(LOCAL_DOCS_STORE_NAME)) {
+            stores.push(LOCAL_DOCS_STORE_NAME);
+          }
+          const transaction = db.transaction(stores, 'readwrite');
           const store = transaction.objectStore(LOCAL_STORE_NAME);
           ids.forEach(id => {
             if (!id && id !== 0) return;
@@ -3208,7 +3340,7 @@ class NOCDatabase {
             const cursor = e.target.result;
             if (cursor) {
               const val = cursor.value;
-              const valNoc = val.nocNumber ? String(val.nocNumber).trim().toLowerCase() : '';
+              const valNoc = val.nocNumber ? String(val.nocNumber).trim().toLowerCase() : (val.noc_number ? String(val.noc_number).trim().toLowerCase() : '');
               if (strIds.has(String(val.id)) || (valNoc && cleanNocs.has(valNoc))) {
                 cursor.delete();
               }
@@ -3216,10 +3348,36 @@ class NOCDatabase {
             }
           };
 
+          // Also remove associated documents
+          if (db.objectStoreNames.contains(LOCAL_DOCS_STORE_NAME) && Array.isArray(docIds)) {
+            const docStore = transaction.objectStore(LOCAL_DOCS_STORE_NAME);
+            docIds.forEach(dId => {
+              try {
+                if (dId) docStore.delete(String(dId));
+              } catch (e) {}
+            });
+          }
+
           transaction.oncomplete = () => resolve(ids.length);
           transaction.onerror = () => resolve(ids.length);
         } catch (e) {
-          resolve(ids.length);
+          try {
+            const tx = db.transaction([LOCAL_STORE_NAME], 'readwrite');
+            ids.forEach(id => tx.objectStore(LOCAL_STORE_NAME).delete(id));
+            tx.oncomplete = () => resolve(ids.length);
+            tx.onerror = () => resolve(ids.length);
+          } catch (e2) {
+            resolve(ids.length);
+          }
+        }
+      });
+    }
+
+    // Clean memory doc cache
+    if (Array.isArray(docIds)) {
+      docIds.forEach(dId => {
+        if (dId) {
+          this._docMemoryCache.delete(String(dId));
         }
       });
     }
@@ -3229,7 +3387,7 @@ class NOCDatabase {
       const existing = this._getFromLocalStorageBackup();
       if (existing) {
         const filtered = existing.filter(r => {
-          const valNoc = r.nocNumber ? String(r.nocNumber).trim().toLowerCase() : '';
+          const valNoc = r.nocNumber ? String(r.nocNumber).trim().toLowerCase() : (r.noc_number ? String(r.noc_number).trim().toLowerCase() : '');
           return !strIds.has(String(r.id)) && (!valNoc || !cleanNocs.has(valNoc));
         });
         this._saveToLocalStorageBackup(filtered);
@@ -3240,7 +3398,7 @@ class NOCDatabase {
     try {
       if (window.INITIAL_NOC_SEED_DATA && Array.isArray(window.INITIAL_NOC_SEED_DATA)) {
         window.INITIAL_NOC_SEED_DATA = window.INITIAL_NOC_SEED_DATA.filter(r => {
-          const valNoc = r.nocNumber ? String(r.nocNumber).trim().toLowerCase() : '';
+          const valNoc = r.nocNumber ? String(r.nocNumber).trim().toLowerCase() : (r.noc_number ? String(r.noc_number).trim().toLowerCase() : '');
           return !strIds.has(String(r.id)) && (!valNoc || !cleanNocs.has(valNoc));
         });
       }

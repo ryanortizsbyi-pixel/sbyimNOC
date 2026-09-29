@@ -1420,6 +1420,44 @@ class UIManager {
       });
     }
 
+    // Configure details modal footer actions for Admin / Developer
+    const detailsFooter = modal.querySelector('.modal-footer');
+    if (detailsFooter) {
+      if (isAdmin) {
+        detailsFooter.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center; width:100%; gap:0.5rem; flex-wrap:wrap;">
+            <button type="button" class="btn btn-sm btn-outline" style="color:#DC2626; border-color:#FCA5A5; display:inline-flex; align-items:center; gap:0.35rem;" id="btnDetailsDeleteRecord" title="Permanently Delete Record">
+              <span>🗑️</span> <span>Delete Record</span>
+            </button>
+            <div style="display:flex; gap:0.5rem; align-items:center;">
+              <button type="button" class="btn btn-outline" onclick="window.nocUI.closeDetailsModal()">Close</button>
+              <button type="button" class="btn btn-primary" id="btnDetailsEditRecord" title="Edit NOC Record" style="display:inline-flex; align-items:center; gap:0.35rem;">
+                <span>✏️</span> <span>Edit Record</span>
+              </button>
+            </div>
+          </div>
+        `;
+        const btnDel = detailsFooter.querySelector('#btnDetailsDeleteRecord');
+        if (btnDel) {
+          btnDel.onclick = () => {
+            this.closeDetailsModal();
+            this.openDeleteModal(record.id);
+          };
+        }
+        const btnEdit = detailsFooter.querySelector('#btnDetailsEditRecord');
+        if (btnEdit) {
+          btnEdit.onclick = () => {
+            this.closeDetailsModal();
+            this.openEditModal(record.id);
+          };
+        }
+      } else {
+        detailsFooter.innerHTML = `
+          <button type="button" class="btn btn-outline" onclick="window.nocUI.closeDetailsModal()">Close</button>
+        `;
+      }
+    }
+
     modal.classList.add('active');
   }
 
@@ -1462,19 +1500,19 @@ class UIManager {
       if (record) {
         const canViewClient = window.nocAuth && window.nocAuth.canViewClient ? window.nocAuth.canViewClient() : false;
         const subtitle = canViewClient && record.client ? record.client : (record.issuedTo || record.nocType || '');
-        msgEl.innerHTML = `Are you sure you want to delete NOC record <strong>"${this.escapeHTML(record.nocNumber)}"</strong>${subtitle ? ` (${this.escapeHTML(subtitle)})` : ''}? This action will permanently remove the record and attached documents from the database.`;
+        msgEl.innerHTML = `Are you sure you want to permanently delete NOC record <strong>"${this.escapeHTML(record.nocNumber)}"</strong>${subtitle ? ` (${this.escapeHTML(subtitle)})` : ''}?<br><br><span style="font-size:0.85rem; color:var(--text-muted); display:block; background:var(--bg-subtle, #F8FAFC); padding:0.6rem 0.8rem; border-radius:6px; border:1px solid var(--border-light, #E2E8F0); line-height:1.45;">⚠️ <strong>Permanent Action:</strong> This record and its attached documents will be permanently removed from both the <strong>Local Browser Database (IndexedDB)</strong> and the <strong>Supabase PostgreSQL Database</strong>. This operation cannot be undone.</span>`;
       } else {
-        msgEl.innerHTML = `Are you sure you want to delete this NOC record (ID: <strong>${this.escapeHTML(String(id))}</strong>)? This action cannot be undone.`;
+        msgEl.innerHTML = `Are you sure you want to permanently delete this NOC record (ID: <strong>${this.escapeHTML(String(id))}</strong>)?<br><br><span style="font-size:0.85rem; color:var(--text-muted); display:block; background:var(--bg-subtle, #F8FAFC); padding:0.6rem 0.8rem; border-radius:6px; border:1px solid var(--border-light, #E2E8F0); line-height:1.45;">⚠️ <strong>Permanent Action:</strong> The record will be permanently deleted from both Local Storage and Supabase PostgreSQL Database.</span>`;
       }
     }
 
     if (modal) {
       modal.classList.add('active');
     } else {
-      if (confirm('Are you sure you want to delete this NOC record? This action cannot be undone.')) {
+      if (confirm('Are you sure you want to permanently delete this NOC record from Local Database and Supabase PostgreSQL? This action cannot be undone.')) {
         try {
           await window.nocDB.delete(id);
-          this.showToast('NOC Record deleted successfully.', 'success');
+          this.showToast('NOC Record permanently deleted.', 'success');
           if (window.nocApp && window.nocApp.refreshData) {
             await window.nocApp.refreshData();
           }
