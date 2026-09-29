@@ -747,7 +747,8 @@ class NOCDatabase {
           .single();
 
         if (error) {
-          console.warn('Supabase add error:', error.message);
+          console.error('Supabase add error:', error);
+          throw new Error(error.message || 'Supabase insert failed');
         } else if (data) {
           const mapped = this.mapDbToRecord(data);
           if (newRecord.documents && Array.isArray(newRecord.documents) && newRecord.documents.length > 0) {
@@ -757,7 +758,8 @@ class NOCDatabase {
           return mapped;
         }
       } catch (err) {
-        console.warn('Supabase add failed, storing in local DB:', err.message);
+        console.error('Supabase add failed:', err);
+        throw err;
       }
     }
 
@@ -818,7 +820,8 @@ class NOCDatabase {
           .single();
 
         if (error) {
-          console.warn('Supabase update upsert note:', error.message);
+          console.error('Supabase update error:', error);
+          throw new Error(error.message || 'Supabase update failed');
         } else if (data) {
           const mapped = this.mapDbToRecord(data);
           if (mergedRecord.documents && Array.isArray(mergedRecord.documents) && mergedRecord.documents.length > 0) {
@@ -828,7 +831,8 @@ class NOCDatabase {
           return mapped;
         }
       } catch (err) {
-        console.warn('Supabase update failed, storing in local DB:', err.message);
+        console.error('Supabase update failed:', err);
+        throw err;
       }
     }
 
