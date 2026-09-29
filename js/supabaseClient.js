@@ -257,6 +257,7 @@ class SupabaseConfigManager {
             table: table
           },
           (payload) => {
+            console.log('[Realtime NOC event]', payload);
             console.log(`⚡ [Realtime:${table}] Received event (${payload.eventType}):`, payload);
             if (typeof onEvent === 'function') {
               try {
@@ -268,6 +269,7 @@ class SupabaseConfigManager {
           }
         )
         .subscribe((status, err) => {
+          console.log('[Realtime subscription status]', status);
           console.log(`⚡ [Realtime:${table}] Channel status: ${status}`, err ? `(Note: ${err.message})` : '');
           if (typeof onStatusChange === 'function') {
             try {

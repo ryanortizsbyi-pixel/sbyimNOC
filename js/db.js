@@ -557,11 +557,15 @@ class NOCDatabase {
   _initRealtimeSubscription() {
     if (!window.supabaseManager || !this.isSupabaseActive()) return;
 
+    if (this._realtimeSubscribed && this._realtimeUnsubscribe) {
+      return;
+    }
+
     this._realtimeSubscribed = true;
-    console.log('⚡ Initializing Supabase Realtime channel subscription on noc_records table...');
+    console.log('⚡ Initializing Supabase Realtime channel subscription on noc_records table (channel: noc-records-realtime)...');
 
     const unsubscribe = window.supabaseManager.subscribeToTable(
-      'noc_records_realtime_channel',
+      'noc-records-realtime',
       'noc_records',
       async (payload) => {
         console.log(`⚡ [Realtime Event: noc_records] Action: ${payload.eventType}`, payload);
@@ -626,7 +630,7 @@ class NOCDatabase {
       this._realtimeUnsubscribe = null;
     }
     if (window.supabaseManager) {
-      window.supabaseManager.unsubscribeChannel('noc_records_realtime_channel');
+      window.supabaseManager.unsubscribeChannel('noc-records-realtime');
     }
   }
 

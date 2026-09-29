@@ -642,9 +642,9 @@ class NOCApp {
       this.filteredRecords.sort((a, b) => (a.nocNumber || '').localeCompare(b.nocNumber || ''));
     }
 
-    // 5. Paginate records (10 per page)
+    // 5. Paginate records (25 per page)
     const totalRecords = this.filteredRecords.length;
-    const pageSize = this.pageSize || 10;
+    const pageSize = this.pageSize || 25;
     const totalPages = Math.max(1, Math.ceil(totalRecords / pageSize));
     if (this.currentPage > totalPages) this.currentPage = totalPages;
     if (this.currentPage < 1) this.currentPage = 1;
