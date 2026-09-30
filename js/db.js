@@ -134,9 +134,7 @@ class NOCDatabase {
    */
   async purgeLegacyDemoData() {
     const PURGE_KEY = 'noc_records_purged_clear_all_v5';
-    const isPurged = localStorage.getItem(PURGE_KEY);
-    if (!isPurged) {
-      await this.clearAll().catch((e) => console.warn('Purge clearAll error:', e));
+    if (!localStorage.getItem(PURGE_KEY)) {
       localStorage.setItem(PURGE_KEY, 'true');
     }
 
@@ -469,6 +467,7 @@ class NOCDatabase {
     if (this.isSupabaseActive()) {
       try {
         console.log('[Supabase] Fetching NOC records (lightweight metadata)');
+        const client = this.getSupabaseClient();
         const { data, error } = await client
           .from('noc_records')
           .select('id, noc_number, noc_type, client, issued_to, company_code, date_of_issuance, date_of_expiration, description, created_at, updated_at')
