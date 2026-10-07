@@ -123,6 +123,26 @@ class DocumentViewer {
       document.body.style.overflow = 'hidden';
     }
 
+    const deleteBtn = document.getElementById('viewerDeleteExpiredPdfBtn');
+    if (deleteBtn) {
+      let isExpRecord = false;
+      if (this.currentRecordId && window.nocApp && Array.isArray(window.nocApp.allRecords)) {
+        const rec = window.nocApp.allRecords.find(r => String(r.id) === String(this.currentRecordId) || String(r.nocNumber) === String(this.currentRecordId));
+        if (rec && window.nocDB && window.nocDB.getStatus(rec.dateOfExpiration) === 'expired') {
+          isExpRecord = true;
+        }
+      }
+      const isDev = window.nocAuth && window.nocAuth.isDeveloper && window.nocAuth.isDeveloper();
+      deleteBtn.style.display = (isDev && isExpRecord) ? 'inline-flex' : 'none';
+      deleteBtn.onclick = () => {
+        const currentDoc = this.currentDocs[this.currentIndex];
+        this.close();
+        if (window.nocUI && window.nocUI.openDeleteExpiredPdfModal) {
+          window.nocUI.openDeleteExpiredPdfModal(this.currentRecordId, currentDoc ? currentDoc.id : null);
+        }
+      };
+    }
+
     this.renderCurrentDocument();
     this.renderThumbnails();
   }

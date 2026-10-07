@@ -820,6 +820,130 @@ class NOCApp {
       });
     }
 
+    // Confirm Expired PDF Delete Button (Developer Role Only)
+    const btnCloseDeletePdfModal = document.getElementById('btnCloseDeletePdfModal');
+    const btnCancelDeletePdf = document.getElementById('btnCancelDeletePdf');
+    if (btnCloseDeletePdfModal) btnCloseDeletePdfModal.addEventListener('click', () => window.nocUI.closeDeleteExpiredPdfModal());
+    if (btnCancelDeletePdf) btnCancelDeletePdf.addEventListener('click', () => window.nocUI.closeDeleteExpiredPdfModal());
+
+    const deletePdfConfirmModal = document.getElementById('deletePdfConfirmModal');
+    if (deletePdfConfirmModal) {
+      deletePdfConfirmModal.addEventListener('click', (e) => {
+        if (e.target === deletePdfConfirmModal) window.nocUI.closeDeleteExpiredPdfModal();
+      });
+    }
+
+    const btnConfirmDeletePdf = document.getElementById('btnConfirmDeletePdf');
+    if (btnConfirmDeletePdf) {
+      btnConfirmDeletePdf.addEventListener('click', async () => {
+        if (!window.nocAuth || !window.nocAuth.isDeveloper()) {
+          window.showToast('Access restricted: Developer role required to delete PDF files.', 'error');
+          return;
+        }
+
+        const recId = window.nocUI.pendingDeletePdfRecordId;
+        const docId = window.nocUI.pendingDeletePdfDocId;
+
+        if (recId) {
+          try {
+            btnConfirmDeletePdf.disabled = true;
+            btnConfirmDeletePdf.textContent = 'Deleting from Supabase SQL...';
+
+            const updatedRec = await window.nocDB.deletePdfDocument(recId, docId);
+
+            // Update in-memory arrays
+            const strId = String(recId);
+            this.allRecords = (this.allRecords || []).map(r => {
+              if (String(r.id) === strId || r.nocNumber === strId || (r.noc_number && String(r.noc_number) === strId)) {
+                return updatedRec;
+              }
+              return r;
+            });
+            this.filteredRecords = (this.filteredRecords || []).map(r => {
+              if (String(r.id) === strId || r.nocNumber === strId || (r.noc_number && String(r.noc_number) === strId)) {
+                return updatedRec;
+              }
+              return r;
+            });
+
+            window.nocUI.closeDeleteExpiredPdfModal();
+
+            // Refresh details modal if open
+            const detailsModal = document.getElementById('nocDetailsModal');
+            if (detailsModal && detailsModal.classList.contains('active')) {
+              window.nocUI.openDetailsModal(recId);
+            }
+
+            this.applyFilters();
+            const isSupabase = window.nocDB.isSupabaseActive();
+            window.showToast(`🗑️ PDF document permanently deleted from ${isSupabase ? 'Supabase SQL (noc_records table)' : 'Database'}.`, 'success', 5000);
+          } catch (err) {
+            console.error('Delete PDF error:', err);
+            window.showToast('Failed to delete PDF: ' + err.message, 'error');
+          } finally {
+            btnConfirmDeletePdf.disabled = false;
+            btnConfirmDeletePdf.innerHTML = `<span>🗑️</span> <span>Delete PDF From Supabase SQL</span>`;
+          }
+        }
+      });
+    }
+
+    // Confirm Bulk Expired PDF Purge Button (Developer Role Only)
+    const btnCloseBulkDeletePdfModal = document.getElementById('btnCloseBulkDeletePdfModal');
+    const btnCancelBulkDeletePdf = document.getElementById('btnCancelBulkDeletePdf');
+    if (btnCloseBulkDeletePdfModal) btnCloseBulkDeletePdfModal.addEventListener('click', () => window.nocUI.closeBulkDeleteExpiredPdfsModal());
+    if (btnCancelBulkDeletePdf) btnCancelBulkDeletePdf.addEventListener('click', () => window.nocUI.closeBulkDeleteExpiredPdfsModal());
+
+    const bulkDeletePdfConfirmModal = document.getElementById('bulkDeletePdfConfirmModal');
+    if (bulkDeletePdfConfirmModal) {
+      bulkDeletePdfConfirmModal.addEventListener('click', (e) => {
+        if (e.target === bulkDeletePdfConfirmModal) window.nocUI.closeBulkDeleteExpiredPdfsModal();
+      });
+    }
+
+    const btnConfirmBulkDeletePdf = document.getElementById('btnConfirmBulkDeletePdf');
+    if (btnConfirmBulkDeletePdf) {
+      btnConfirmBulkDeletePdf.addEventListener('click', async () => {
+        if (!window.nocAuth || !window.nocAuth.isDeveloper()) {
+          window.showToast('Access restricted: Developer role required to purge expired PDFs.', 'error');
+          return;
+        }
+
+        const idsToPurge = window.nocUI.pendingBulkExpiredPdfRecordIds;
+        if (!idsToPurge || idsToPurge.length === 0) {
+          window.nocUI.closeBulkDeleteExpiredPdfsModal();
+          return;
+        }
+
+        try {
+          btnConfirmBulkDeletePdf.disabled = true;
+          btnConfirmBulkDeletePdf.textContent = 'Purging PDFs in Supabase SQL...';
+
+          const res = await window.nocDB.deleteExpiredPdfs(idsToPurge);
+
+          if (res && res.affectedRecords) {
+            const updatedMap = new Map();
+            res.affectedRecords.forEach(ar => updatedMap.set(String(ar.id), ar));
+
+            this.allRecords = (this.allRecords || []).map(r => updatedMap.get(String(r.id)) || r);
+            this.filteredRecords = (this.filteredRecords || []).map(r => updatedMap.get(String(r.id)) || r);
+          }
+
+          window.nocUI.closeBulkDeleteExpiredPdfsModal();
+          this.applyFilters();
+
+          const isSupabase = window.nocDB.isSupabaseActive();
+          window.showToast(`🎉 Successfully deleted PDF files for ${res.count} expired NOC record${res.count === 1 ? '' : 's'} permanently from ${isSupabase ? 'Supabase SQL' : 'Database'}.`, 'success', 5000);
+        } catch (err) {
+          console.error('Bulk PDF purge error:', err);
+          window.showToast('Failed to purge expired PDFs: ' + err.message, 'error');
+        } finally {
+          btnConfirmBulkDeletePdf.disabled = false;
+          btnConfirmBulkDeletePdf.innerHTML = `🗑️ Purge Expired PDFs (<span id="bulkDeletePdfBtnCount">0</span>)`;
+        }
+      });
+    }
+
     // Developer Bulk Delete Event Bindings
     const selectAllCheckbox = document.getElementById('selectAllCheckbox');
     if (selectAllCheckbox) {
@@ -1850,6 +1974,7 @@ class NOCApp {
     // Export & Import Utilities
     const btnExportCSV = document.getElementById('btnExportCSV');
     const btnExportJSON = document.getElementById('btnExportJSON');
+    const btnDeleteExpiredPdfs = document.getElementById('btnDeleteExpiredPdfs');
     const btnImportJSON = document.getElementById('btnImportJSON');
     const inputImportJSON = document.getElementById('inputImportJSON');
     const btnModalImportJSON = document.getElementById('btnModalImportJSON');
@@ -1857,6 +1982,15 @@ class NOCApp {
 
     if (btnExportCSV) btnExportCSV.addEventListener('click', () => this.exportCSV());
     if (btnExportJSON) btnExportJSON.addEventListener('click', () => this.exportJSON());
+    if (btnDeleteExpiredPdfs) {
+      btnDeleteExpiredPdfs.addEventListener('click', () => {
+        if (!window.nocAuth || !window.nocAuth.isDeveloper()) {
+          window.showToast('Access restricted: Developer role required to delete expired PDF files.', 'error');
+          return;
+        }
+        window.nocUI.openBulkDeleteExpiredPdfsModal();
+      });
+    }
     if (btnImportJSON && inputImportJSON) {
       btnImportJSON.addEventListener('click', () => {
         if (!window.nocAuth || !window.nocAuth.canImportJSON()) {

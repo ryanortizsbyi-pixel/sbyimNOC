@@ -841,6 +841,171 @@ class NOCDatabase {
   }
 
   /**
+   * Delete PDF file permanently from an Expired NOC record in Supabase SQL (PostgreSQL noc_records table) and Local DB.
+   * Strictly allowed only for records with "Expired" status.
+   *
+   * @param {string|number} id Record ID or NOC Number
+   * @param {string} [docId] Optional specific document ID or Name to remove; if omitted, removes all attached PDFs
+   * @returns {Promise<Object>} The updated record with PDF removed
+   */
+  async deletePdfDocument(id, docId = null) {
+    if (!id && id !== 0) return false;
+
+    // 1. Get the existing record
+    let record = await this.getById(id);
+    if (!record && window.nocApp && Array.isArray(window.nocApp.allRecords)) {
+      record = window.nocApp.allRecords.find(r => String(r.id) === String(id) || String(r.nocNumber) === String(id) || (r.noc_number && String(r.noc_number) === String(id)));
+    }
+    if (!record) {
+      throw new Error(`Record with ID "${id}" not found.`);
+    }
+
+    // 2. Validate that the record status is "Expired"
+    const status = this.getStatus(record.dateOfExpiration);
+    if (status !== 'expired') {
+      throw new Error(`PDF deletion is only permitted for NOC records with "Expired" status (Current status: ${status.toUpperCase()}).`);
+    }
+
+    const currentDocs = Array.isArray(record.documents) ? [...record.documents] : [];
+    if (currentDocs.length === 0) {
+      return record;
+    }
+
+    // Filter documents to remove and remaining documents
+    const docsToRemove = [];
+    const remainingDocs = [];
+
+    currentDocs.forEach(d => {
+      const isTarget = docId ? (String(d.id) === String(docId) || String(d.name) === String(docId)) : true;
+      if (isTarget) {
+        docsToRemove.push(d);
+      } else {
+        remainingDocs.push(d);
+      }
+    });
+
+    if (docsToRemove.length === 0) {
+      return record;
+    }
+
+    const docIdsToRemove = [];
+    const storagePathsToRemove = [];
+
+    docsToRemove.forEach(d => {
+      if (d.id) docIdsToRemove.push(String(d.id));
+      if (d.name) docIdsToRemove.push(String(d.name));
+      const urlStr = d.dataUrl || d.data_url || d.url || '';
+      if (urlStr && urlStr.includes('supabase.co/storage')) {
+        const parts = urlStr.split('/noc-documents/');
+        if (parts[1]) storagePathsToRemove.push(parts[1].split('?')[0]);
+      }
+    });
+
+    const nowIso = new Date().toISOString();
+
+    // 3. Update Supabase PostgreSQL SQL Table `noc_records` directly (Permanent SQL update)
+    if (this.isSupabaseActive()) {
+      try {
+        console.log(`[Supabase SQL] Permanently deleting PDF from expired NOC record (id: ${record.id}, noc: ${record.nocNumber})`);
+        const client = this.getSupabaseClient();
+        if (client) {
+          // Direct SQL UPDATE on noc_records table setting documents to remainingDocs JSONB
+          const { error: sqlError } = await client
+            .from('noc_records')
+            .update({
+              documents: remainingDocs,
+              updated_at: nowIso
+            })
+            .eq('id', String(record.id));
+
+          if (sqlError) {
+            console.error('Supabase SQL PDF deletion error:', sqlError);
+            throw new Error(sqlError.message || 'Failed to update documents in Supabase SQL noc_records table');
+          }
+
+          // Also delete from Supabase storage bucket if file was stored there
+          if (storagePathsToRemove.length > 0) {
+            try {
+              await client.storage.from('noc-documents').remove(storagePathsToRemove);
+            } catch (storErr) {
+              console.warn('Supabase storage removal note:', storErr.message);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Supabase deletePdfDocument failed:', err);
+        throw err;
+      }
+    }
+
+    // 4. Update local IndexedDB and memory caches
+    const updatedRecord = {
+      ...record,
+      documents: remainingDocs,
+      updatedAt: nowIso
+    };
+
+    await this._localPut(updatedRecord);
+
+    // Remove from dedicated local document store
+    const db = await this._getLocalDB();
+    if (db && db.objectStoreNames.contains(LOCAL_DOCS_STORE_NAME)) {
+      try {
+        const tx = db.transaction([LOCAL_DOCS_STORE_NAME], 'readwrite');
+        const store = tx.objectStore(LOCAL_DOCS_STORE_NAME);
+        docIdsToRemove.forEach(dId => {
+          try { store.delete(dId); } catch (e) {}
+        });
+      } catch (e) {}
+    }
+
+    // Remove from memory cache
+    docIdsToRemove.forEach(dId => {
+      this._docMemoryCache.delete(dId);
+    });
+
+    return updatedRecord;
+  }
+
+  /**
+   * Bulk delete PDF files from all or selected Expired NOC records permanently in Supabase SQL.
+   *
+   * @param {Array<string|number>} [targetRecordIds] Optional array of record IDs; if omitted, purges PDFs from all expired records
+   * @returns {Promise<{ count: number, affectedRecords: Array }>}
+   */
+  async deleteExpiredPdfs(targetRecordIds = null) {
+    let allRecs = window.nocApp && Array.isArray(window.nocApp.allRecords) ? window.nocApp.allRecords : await this.getAll();
+    
+    // Filter for expired records that have documents
+    let expiredRecsWithDocs = allRecs.filter(r => {
+      const isExpired = this.getStatus(r.dateOfExpiration) === 'expired';
+      const hasDocs = Array.isArray(r.documents) && r.documents.length > 0;
+      if (!isExpired || !hasDocs) return false;
+      if (targetRecordIds && Array.isArray(targetRecordIds) && targetRecordIds.length > 0) {
+        const idSet = new Set(targetRecordIds.map(i => String(i)));
+        return idSet.has(String(r.id)) || (r.nocNumber && idSet.has(String(r.nocNumber)));
+      }
+      return true;
+    });
+
+    if (expiredRecsWithDocs.length === 0) {
+      return { count: 0, affectedRecords: [] };
+    }
+
+    const affected = [];
+    for (const rec of expiredRecsWithDocs) {
+      try {
+        const updated = await this.deletePdfDocument(rec.id);
+        affected.push(updated || rec);
+      } catch (err) {
+        console.warn(`Failed to delete PDF for expired NOC ${rec.nocNumber}:`, err);
+      }
+    }
+
+    return { count: affected.length, affectedRecords: affected };
+  }
+
+  /**
    * Delete an NOC record permanently from both Supabase PostgreSQL and Local Database.
    */
   async delete(id) {

@@ -109,6 +109,9 @@
             <button class="btn btn-outline" id="btnExportJSON" title="Download complete JSON backup" style="display: none;">
               💾 Backup JSON
             </button>
+            <button class="btn btn-outline btn-delete-expired-pdf" id="btnDeleteExpiredPdfs" title="Delete PDF files permanently from all Expired NOC records in Supabase SQL (Developer Only)" style="display: none;">
+              🗑️ Delete Expired PDFs
+            </button>
             <button class="btn btn-outline" id="btnImportJSON" title="Load / Restore JSON database backup file" style="display: none;">
               📥 Load JSON
             </button>
@@ -540,6 +543,55 @@
     </div>
   </div>
 
+  <!-- 3.2 Developer Expired PDF Delete Confirmation Modal -->
+  <div class="modal-overlay" id="deletePdfConfirmModal">
+    <div class="modal-container small">
+      <div class="modal-header">
+        <h3 class="modal-title" style="color:#DC2626; display:flex; align-items:center; gap:0.5rem;">
+          <span>🗑️</span> <span>Permanently Delete Expired PDF</span>
+        </h3>
+        <button class="modal-close" id="btnCloseDeletePdfModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="deletePdfConfirmMessage" style="font-size:0.95rem; color:var(--text-main); line-height:1.5;">
+          <!-- Dynamically rendered -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" id="btnCancelDeletePdf">Cancel</button>
+        <button type="button" class="btn btn-danger" id="btnConfirmDeletePdf" style="background:#DC2626; color:#fff; font-weight:700; display:inline-flex; align-items:center; gap:0.4rem;">
+          <span>🗑️</span> <span>Delete PDF From Supabase SQL</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3.3 Developer Bulk Expired PDF Purge Confirmation Modal -->
+  <div class="modal-overlay" id="bulkDeletePdfConfirmModal">
+    <div class="modal-container small">
+      <div class="modal-header">
+        <h3 class="modal-title" style="color:#DC2626; display:flex; align-items:center; gap:0.5rem;">
+          <span>🗑️</span> <span>Purge Expired NOC PDF Files</span>
+        </h3>
+        <button class="modal-close" id="btnCloseBulkDeletePdfModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="bulkDeletePdfConfirmMessage" style="font-size:0.95rem; color:var(--text-main); line-height:1.5; margin-bottom:0.75rem;">
+          <!-- Dynamically populated -->
+        </p>
+        <div id="bulkDeletePdfRecordList" style="max-height:160px; overflow-y:auto; background:var(--bg-subtle, #F8FAFC); border:1px solid var(--border-light, #E2E8F0); border-radius:6px; padding:0.6rem; font-size:0.85rem; font-family:monospace; line-height:1.6; color:var(--text-main);">
+          <!-- Dynamic summary list -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" id="btnCancelBulkDeletePdf">Cancel</button>
+        <button type="button" class="btn btn-danger" id="btnConfirmBulkDeletePdf" style="background:#DC2626; color:#fff; font-weight:700;">
+          🗑️ Purge Expired PDFs (<span id="bulkDeletePdfBtnCount">0</span>)
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- 4. Role Switch / Login Modal (Secure Split Layout) -->
   <div class="modal-overlay" id="loginModal">
     <div class="modal-container login-split-container">
@@ -938,6 +990,7 @@
         <button class="viewer-btn" id="viewerRotateBtn" title="Rotate 90°">🔄 Rotate</button>
         <button class="viewer-btn" id="viewerResetBtn" title="Reset View">↔️ Fit</button>
         <button class="viewer-btn primary" id="viewerDownloadBtn" title="Download Document">📥 Download</button>
+        <button class="viewer-btn" id="viewerDeleteExpiredPdfBtn" title="Permanently delete PDF file from Supabase SQL (Expired record only)" style="display:none; background:#DC2626; color:#fff; border-color:#DC2626;">🗑️ Delete PDF</button>
         <button class="viewer-close-btn" id="viewerCloseBtn" title="Close Viewer (Esc)">✕ Close</button>
       </div>
     </div>

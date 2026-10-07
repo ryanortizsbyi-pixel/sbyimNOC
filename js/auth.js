@@ -275,6 +275,10 @@ class AuthManager {
     return role === 'developer' || username === 'ryan';
   }
 
+  canDeleteExpiredPdf() {
+    return this.isDeveloper();
+  }
+
   canBulkDelete() {
     return this.isAdmin(); // Allow Admin and Developer to bulk delete / delete all records
   }

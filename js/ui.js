@@ -384,6 +384,12 @@ class UIManager {
       btnAiDocuments.disabled = !isDeveloper;
     }
 
+    const btnDeleteExpiredPdfs = document.getElementById('btnDeleteExpiredPdfs');
+    if (btnDeleteExpiredPdfs) {
+      btnDeleteExpiredPdfs.style.display = isDeveloper ? 'inline-flex' : 'none';
+      btnDeleteExpiredPdfs.disabled = !isDeveloper;
+    }
+
     const btnUserDatabase = document.getElementById('btnUserDatabase');
     const canManageUsers = window.nocAuth && window.nocAuth.canManageUsers();
     if (btnUserDatabase) {
@@ -658,6 +664,8 @@ class UIManager {
     records.forEach((rec) => {
       const status = window.nocDB.getStatus(rec.dateOfExpiration);
       const isChecked = this.selectedRecordIds.has(rec.id);
+      const hasPdfDoc = Array.isArray(rec.documents) && rec.documents.some(d => d.type === 'application/pdf' || (d.name && d.name.toLowerCase().endsWith('.pdf')) || d.dataUrl);
+      const canDeleteExpiredPdf = isDeveloper && status === 'expired' && hasPdfDoc;
 
       let statusBadge = '';
       if (status === 'active') {
@@ -695,6 +703,11 @@ class UIManager {
             <button class="btn btn-sm btn-outline-primary" data-action="view" data-id="${rec.id}" title="View NOC Details & Documents">
               👁️ View
             </button>
+            ${canDeleteExpiredPdf ? `
+              <button class="btn btn-sm btn-delete-expired-pdf" data-action="delete-expired-pdf" data-id="${rec.id}" title="Delete PDF file permanently from Supabase SQL (Expired record only)">
+                🗑️ PDF
+              </button>
+            ` : ''}
             ${isAdmin ? `
               <button class="btn btn-sm btn-outline" data-action="edit" data-id="${rec.id}" title="Edit NOC">
                 ✏️ Edit
@@ -798,6 +811,11 @@ class UIManager {
             <button class="btn btn-sm btn-outline-primary" data-action="view" data-id="${rec.id}">
               👁️ View
             </button>
+            ${(isDeveloper && status === 'expired' && docsCount > 0) ? `
+              <button class="btn btn-sm btn-delete-expired-pdf" data-action="delete-expired-pdf" data-id="${rec.id}" title="Permanently delete PDF file from Supabase SQL">
+                🗑️ Delete PDF
+              </button>
+            ` : ''}
             ${isAdmin ? `
               <button class="btn btn-sm btn-outline" data-action="edit" data-id="${rec.id}">
                 ✏️ Edit
@@ -898,6 +916,8 @@ class UIManager {
           this.openEditModal(id);
         } else if (action === 'delete') {
           this.openDeleteModal(id);
+        } else if (action === 'delete-expired-pdf') {
+          this.openDeleteExpiredPdfModal(id);
         } else if (action === 'download-all') {
           this.downloadAllRecordDocs(id);
         }
@@ -1346,11 +1366,18 @@ class UIManager {
         <h4 style="font-size:1rem; font-weight:700; color:var(--text-main); margin:0;">
           Attached Documents &amp; Certificates
         </h4>
-        ${hasDocs ? `
-        <button type="button" class="btn btn-sm btn-primary" id="btnQuickOpenPdf" style="font-weight:600; padding:0.4rem 0.9rem; border-radius:6px; box-shadow:0 2px 8px rgba(13, 148, 136, 0.2);">
-          📄 View PDF Certificate
-        </button>
-        ` : ''}
+        <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+          ${(hasDocs && isDeveloper && status === 'expired') ? `
+          <button type="button" class="btn btn-sm btn-delete-expired-pdf" id="btnDetailsDeleteExpiredPdf" title="Permanently delete attached PDF file from Supabase SQL">
+            🗑️ Delete Expired PDF
+          </button>
+          ` : ''}
+          ${hasDocs ? `
+          <button type="button" class="btn btn-sm btn-primary" id="btnQuickOpenPdf" style="font-weight:600; padding:0.4rem 0.9rem; border-radius:6px; box-shadow:0 2px 8px rgba(13, 148, 136, 0.2);">
+            📄 View PDF Certificate
+          </button>
+          ` : ''}
+        </div>
       </div>
 
       ${hasDocs ? `
@@ -1368,6 +1395,11 @@ class UIManager {
                 <button class="btn btn-sm btn-primary" data-view-doc-idx="${idx}" title="Preview PDF / Document">
                   👁️ View PDF
                 </button>
+                ${(isDeveloper && status === 'expired') ? `
+                  <button class="btn btn-sm btn-outline-danger" data-delete-expired-doc-idx="${idx}" title="Delete this PDF file permanently from Supabase SQL" style="color:#DC2626; border-color:#FCA5A5;">
+                    🗑️
+                  </button>
+                ` : ''}
                 ${isAdmin ? `
                   <button class="btn btn-sm btn-outline" data-download-doc-idx="${idx}" title="Download File">
                     📥
@@ -1393,6 +1425,23 @@ class UIManager {
         window.docViewer.open(docs, 0, `NOC Record: ${record.nocNumber}`, { recordId: record.id });
       });
     }
+
+    // Bind Delete Expired PDF in details header
+    const btnDetailsDeleteExpiredPdf = content.querySelector('#btnDetailsDeleteExpiredPdf');
+    if (btnDetailsDeleteExpiredPdf) {
+      btnDetailsDeleteExpiredPdf.addEventListener('click', () => {
+        this.openDeleteExpiredPdfModal(record.id);
+      });
+    }
+
+    // Bind individual document delete buttons (Developer only, expired records)
+    content.querySelectorAll('[data-delete-expired-doc-idx]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.getAttribute('data-delete-expired-doc-idx'), 10);
+        const targetDoc = docs[idx];
+        this.openDeleteExpiredPdfModal(record.id, targetDoc ? targetDoc.id : null);
+      });
+    });
 
     // Bind document preview clicks for all users (Admin & Guest)
     content.querySelectorAll('[data-view-doc-idx]').forEach((btn) => {
@@ -1527,6 +1576,140 @@ class UIManager {
     const modal = document.getElementById('deleteConfirmModal');
     if (modal) modal.classList.remove('active');
     this.pendingDeleteId = null;
+  }
+
+  /**
+   * Open Expired PDF Delete Confirmation Modal (Developer Role Only)
+   */
+  async openDeleteExpiredPdfModal(id, docId = null) {
+    if (!id && id !== 0) return;
+
+    if (!window.nocAuth || !window.nocAuth.isDeveloper()) {
+      this.showToast('Access restricted: Developer role required to delete PDF files.', 'error');
+      return;
+    }
+
+    let record = null;
+    if (window.nocApp && Array.isArray(window.nocApp.allRecords)) {
+      record = window.nocApp.allRecords.find(r => String(r.id) === String(id) || String(r.nocNumber) === String(id) || (r.noc_number && String(r.noc_number) === String(id))) || null;
+    }
+    if (!record && window.nocDB && window.nocDB.getById) {
+      try {
+        record = await window.nocDB.getById(id);
+      } catch (e) {
+        console.warn('Error fetching record in openDeleteExpiredPdfModal:', e);
+      }
+    }
+
+    if (!record) {
+      this.showToast('Record not found.', 'error');
+      return;
+    }
+
+    const status = window.nocDB.getStatus(record.dateOfExpiration);
+    if (status !== 'expired') {
+      this.showToast(`PDF deletion is only permitted for records with "Expired" status (Current status: ${status.toUpperCase()}).`, 'error');
+      return;
+    }
+
+    this.pendingDeletePdfRecordId = record.id;
+    this.pendingDeletePdfDocId = docId;
+
+    const modal = document.getElementById('deletePdfConfirmModal');
+    const msgEl = document.getElementById('deletePdfConfirmMessage');
+
+    const docName = (Array.isArray(record.documents) && record.documents.length > 0)
+      ? (docId ? (record.documents.find(d => String(d.id) === String(docId))?.name || 'PDF Document') : record.documents.map(d => d.name).join(', '))
+      : 'Attached PDF Document';
+
+    if (msgEl) {
+      msgEl.innerHTML = `
+        <div style="margin-bottom:0.85rem; font-size:0.95rem;">
+          Are you sure you want to permanently delete the attached PDF document(s) for Expired NOC record <strong style="color:var(--primary-blue); font-family:monospace; font-size:1.05rem;">"${this.escapeHTML(record.nocNumber)}"</strong>?
+        </div>
+        <div style="background:var(--bg-subtle, #F8FAFC); border:1px solid var(--border-light, #E2E8F0); border-radius:8px; padding:0.85rem; font-size:0.85rem; margin-bottom:1rem; display:flex; flex-direction:column; gap:0.4rem;">
+          <div><strong>Contractor:</strong> ${this.escapeHTML((record.issuedTo || '').toUpperCase())}</div>
+          <div><strong>Expiration Date:</strong> <span style="color:#DC2626; font-weight:700;">${this.formatDate(record.dateOfExpiration)} (Expired)</span></div>
+          <div><strong>Target Document:</strong> <span style="font-family:monospace;">📄 ${this.escapeHTML(docName)}</span></div>
+        </div>
+        <div style="font-size:0.82rem; color:#B91C1C; background:#FEF2F2; padding:0.65rem 0.85rem; border-radius:6px; border:1px solid #FECACA; line-height:1.45;">
+          ⚠️ <strong>Permanent Supabase SQL Action:</strong> The PDF document will be permanently erased from the <strong>Supabase SQL noc_records table</strong> and local storage. The NOC permit details and record metadata will remain intact.
+        </div>
+      `;
+    }
+
+    if (modal) {
+      modal.classList.add('active');
+    }
+  }
+
+  /**
+   * Close Expired PDF Delete Modal
+   */
+  closeDeleteExpiredPdfModal() {
+    const modal = document.getElementById('deletePdfConfirmModal');
+    if (modal) modal.classList.remove('active');
+    this.pendingDeletePdfRecordId = null;
+    this.pendingDeletePdfDocId = null;
+  }
+
+  /**
+   * Open Bulk Delete Expired PDFs Modal (Developer Role Only)
+   */
+  openBulkDeleteExpiredPdfsModal(targetRecordIds = null) {
+    if (!window.nocAuth || !window.nocAuth.isDeveloper()) {
+      this.showToast('Access restricted: Developer role required to purge expired PDFs.', 'error');
+      return;
+    }
+
+    const allRecords = window.nocApp && Array.isArray(window.nocApp.allRecords) ? window.nocApp.allRecords : [];
+    const expiredWithDocs = allRecords.filter(r => {
+      const isExp = window.nocDB.getStatus(r.dateOfExpiration) === 'expired';
+      const hasDocs = Array.isArray(r.documents) && r.documents.length > 0;
+      if (!isExp || !hasDocs) return false;
+      if (targetRecordIds && Array.isArray(targetRecordIds) && targetRecordIds.length > 0) {
+        const set = new Set(targetRecordIds.map(i => String(i)));
+        return set.has(String(r.id)) || (r.nocNumber && set.has(String(r.nocNumber)));
+      }
+      return true;
+    });
+
+    if (expiredWithDocs.length === 0) {
+      this.showToast('No expired NOC records with attached PDF documents found.', 'info');
+      return;
+    }
+
+    this.pendingBulkExpiredPdfRecordIds = expiredWithDocs.map(r => r.id);
+
+    const modal = document.getElementById('bulkDeletePdfConfirmModal');
+    const msgEl = document.getElementById('bulkDeletePdfConfirmMessage');
+    const listEl = document.getElementById('bulkDeletePdfRecordList');
+    const countEl = document.getElementById('bulkDeletePdfBtnCount');
+
+    if (countEl) countEl.textContent = expiredWithDocs.length;
+    if (msgEl) {
+      msgEl.innerHTML = `Are you sure you want to permanently delete the attached PDF files for all <strong>${expiredWithDocs.length}</strong> expired NOC record${expiredWithDocs.length === 1 ? '' : 's'} from <strong>Supabase SQL</strong>?`;
+    }
+
+    if (listEl) {
+      listEl.innerHTML = expiredWithDocs.map((r, i) => {
+        const docNames = (r.documents || []).map(d => d.name).join(', ');
+        return `<div style="padding:0.25rem 0;">${i + 1}. <strong>${this.escapeHTML(r.nocNumber)}</strong> &bull; ${(r.issuedTo || '').toUpperCase()} &bull; <span style="color:#DC2626;">Expired: ${this.formatDate(r.dateOfExpiration)}</span><br><span style="color:var(--text-muted); font-size:0.75rem; padding-left:1rem;">📄 ${this.escapeHTML(docNames)}</span></div>`;
+      }).join('<hr style="border:0; border-top:1px dashed #E2E8F0; margin:0.35rem 0;">');
+    }
+
+    if (modal) {
+      modal.classList.add('active');
+    }
+  }
+
+  /**
+   * Close Bulk Delete Expired PDFs Modal
+   */
+  closeBulkDeleteExpiredPdfsModal() {
+    const modal = document.getElementById('bulkDeletePdfConfirmModal');
+    if (modal) modal.classList.remove('active');
+    this.pendingBulkExpiredPdfRecordIds = null;
   }
 
   /**

@@ -477,6 +477,37 @@ button, input, select, textarea {
   background: #B91C1C;
 }
 
+.btn-outline-danger {
+  background: var(--bg-surface);
+  border-color: #FCA5A5;
+  color: #DC2626;
+}
+
+.btn-outline-danger:hover:not(:disabled) {
+  background: #FEF2F2;
+  border-color: #EF4444;
+  color: #B91C1C;
+}
+
+.btn-delete-expired-pdf {
+  border-color: #FECACA !important;
+  color: #DC2626 !important;
+  background: #FFF5F5 !important;
+  font-weight: 600 !important;
+  transition: all var(--transition-fast) !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.btn-delete-expired-pdf:hover:not(:disabled) {
+  background: #DC2626 !important;
+  color: #FFFFFF !important;
+  border-color: #DC2626 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(220, 38, 38, 0.25);
+}
+
 .btn-icon {
   padding: 0.6rem;
   border-radius: var(--radius-md);
