@@ -466,11 +466,11 @@ class NOCDatabase {
   async getAll() {
     if (this.isSupabaseActive()) {
       try {
-        console.log('[Supabase] Fetching NOC records (lightweight metadata)');
+        console.log('[Supabase] Fetching NOC records with documents metadata');
         const client = this.getSupabaseClient();
         const { data, error } = await client
           .from('noc_records')
-          .select('id, noc_number, noc_type, client, issued_to, company_code, date_of_issuance, date_of_expiration, description, created_at, updated_at')
+          .select('id, noc_number, noc_type, client, issued_to, company_code, date_of_issuance, date_of_expiration, description, documents, created_at, updated_at')
           .order('created_at', { ascending: false })
           .limit(5000);
 
@@ -861,15 +861,13 @@ class NOCDatabase {
     }
 
     // 2. Validate that the record status is "Expired"
-    const status = this.getStatus(record.dateOfExpiration);
+    const expDate = record.dateOfExpiration || record.date_of_expiration;
+    const status = this.getStatus(expDate);
     if (status !== 'expired') {
       throw new Error(`PDF deletion is only permitted for NOC records with "Expired" status (Current status: ${status.toUpperCase()}).`);
     }
 
     const currentDocs = Array.isArray(record.documents) ? [...record.documents] : [];
-    if (currentDocs.length === 0) {
-      return record;
-    }
 
     // Filter documents to remove and remaining documents
     const docsToRemove = [];
@@ -883,10 +881,6 @@ class NOCDatabase {
         remainingDocs.push(d);
       }
     });
-
-    if (docsToRemove.length === 0) {
-      return record;
-    }
 
     const docIdsToRemove = [];
     const storagePathsToRemove = [];
@@ -910,13 +904,35 @@ class NOCDatabase {
         const client = this.getSupabaseClient();
         if (client) {
           // Direct SQL UPDATE on noc_records table setting documents to remainingDocs JSONB
-          const { error: sqlError } = await client
+          let sqlError = null;
+          const { error: errId } = await client
             .from('noc_records')
             .update({
               documents: remainingDocs,
               updated_at: nowIso
             })
             .eq('id', String(record.id));
+
+          if (errId) {
+            console.warn('Supabase PDF delete by id note:', errId.message);
+            sqlError = errId;
+          }
+
+          // Also ensure update by noc_number if present
+          const cleanNoc = record.nocNumber || record.noc_number;
+          if (cleanNoc) {
+            const { error: errNoc } = await client
+              .from('noc_records')
+              .update({
+                documents: remainingDocs,
+                updated_at: nowIso
+              })
+              .eq('noc_number', String(cleanNoc).trim());
+
+            if (!errNoc) {
+              sqlError = null; // Successfully updated by noc_number
+            }
+          }
 
           if (sqlError) {
             console.error('Supabase SQL PDF deletion error:', sqlError);
@@ -976,27 +992,27 @@ class NOCDatabase {
   async deleteExpiredPdfs(targetRecordIds = null) {
     let allRecs = window.nocApp && Array.isArray(window.nocApp.allRecords) ? window.nocApp.allRecords : await this.getAll();
     
-    // Filter for expired records that have documents
-    let expiredRecsWithDocs = allRecs.filter(r => {
-      const isExpired = this.getStatus(r.dateOfExpiration) === 'expired';
-      const hasDocs = Array.isArray(r.documents) && r.documents.length > 0;
-      if (!isExpired || !hasDocs) return false;
+    // Filter strictly for expired records
+    let expiredRecs = allRecs.filter(r => {
+      const expDate = r.dateOfExpiration || r.date_of_expiration;
+      const isExpired = this.getStatus(expDate) === 'expired';
+      if (!isExpired) return false;
       if (targetRecordIds && Array.isArray(targetRecordIds) && targetRecordIds.length > 0) {
-        const idSet = new Set(targetRecordIds.map(i => String(i)));
-        return idSet.has(String(r.id)) || (r.nocNumber && idSet.has(String(r.nocNumber)));
+        const idSet = new Set(targetRecordIds.map(i => String(i).trim()));
+        return idSet.has(String(r.id).trim()) || (r.nocNumber && idSet.has(String(r.nocNumber).trim())) || (r.noc_number && idSet.has(String(r.noc_number).trim()));
       }
       return true;
     });
 
-    if (expiredRecsWithDocs.length === 0) {
+    if (expiredRecs.length === 0) {
       return { count: 0, affectedRecords: [] };
     }
 
     const affected = [];
-    for (const rec of expiredRecsWithDocs) {
+    for (const rec of expiredRecs) {
       try {
         const updated = await this.deletePdfDocument(rec.id);
-        affected.push(updated || rec);
+        affected.push(updated || { ...rec, documents: [] });
       } catch (err) {
         console.warn(`Failed to delete PDF for expired NOC ${rec.nocNumber}:`, err);
       }

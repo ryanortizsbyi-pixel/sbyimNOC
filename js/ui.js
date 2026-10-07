@@ -384,10 +384,11 @@ class UIManager {
       btnAiDocuments.disabled = !isDeveloper;
     }
 
+    const canDeleteExpiredPdf = window.nocAuth && window.nocAuth.canDeleteExpiredPdf && window.nocAuth.canDeleteExpiredPdf();
     const btnDeleteExpiredPdfs = document.getElementById('btnDeleteExpiredPdfs');
     if (btnDeleteExpiredPdfs) {
-      btnDeleteExpiredPdfs.style.display = isDeveloper ? 'inline-flex' : 'none';
-      btnDeleteExpiredPdfs.disabled = !isDeveloper;
+      btnDeleteExpiredPdfs.style.display = canDeleteExpiredPdf ? 'inline-flex' : 'none';
+      btnDeleteExpiredPdfs.disabled = !canDeleteExpiredPdf;
     }
 
     const btnUserDatabase = document.getElementById('btnUserDatabase');
@@ -633,6 +634,7 @@ class UIManager {
 
     const isAdmin = window.nocAuth.isAdmin();
     const isDeveloper = window.nocAuth && window.nocAuth.isDeveloper && window.nocAuth.isDeveloper();
+    const canDeleteExpired = window.nocAuth && window.nocAuth.canDeleteExpiredPdf ? window.nocAuth.canDeleteExpiredPdf() : isDeveloper;
     const canBulkDelete = window.nocAuth && window.nocAuth.canBulkDelete && window.nocAuth.canBulkDelete();
     const canViewClient = window.nocAuth && window.nocAuth.canViewClient ? window.nocAuth.canViewClient() : false;
     const canViewNocType = window.nocAuth && window.nocAuth.canViewNocType ? window.nocAuth.canViewNocType() : false;
@@ -665,7 +667,7 @@ class UIManager {
       const status = window.nocDB.getStatus(rec.dateOfExpiration);
       const isChecked = this.selectedRecordIds.has(rec.id);
       const hasPdfDoc = Array.isArray(rec.documents) && rec.documents.some(d => d.type === 'application/pdf' || (d.name && d.name.toLowerCase().endsWith('.pdf')) || d.dataUrl);
-      const canDeleteExpiredPdf = isDeveloper && status === 'expired' && hasPdfDoc;
+      const canDeleteExpiredPdf = canDeleteExpired && status === 'expired' && hasPdfDoc;
 
       let statusBadge = '';
       if (status === 'active') {
@@ -704,7 +706,7 @@ class UIManager {
               👁️ View
             </button>
             ${canDeleteExpiredPdf ? `
-              <button class="btn btn-sm btn-delete-expired-pdf" data-action="delete-expired-pdf" data-id="${rec.id}" title="Delete PDF file permanently from Supabase SQL (Expired record only)">
+              <button class="btn btn-sm btn-delete-expired-pdf" data-action="delete-expired-pdf" data-id="${rec.id}" title="Delete PDF file permanently from Local DB and Supabase SQL (Expired record only)">
                 🗑️ PDF
               </button>
             ` : ''}
@@ -738,6 +740,7 @@ class UIManager {
 
     const isAdmin = window.nocAuth.isAdmin();
     const isDeveloper = window.nocAuth && window.nocAuth.isDeveloper && window.nocAuth.isDeveloper();
+    const canDeleteExpired = window.nocAuth && window.nocAuth.canDeleteExpiredPdf ? window.nocAuth.canDeleteExpiredPdf() : isDeveloper;
     const canBulkDelete = window.nocAuth && window.nocAuth.canBulkDelete && window.nocAuth.canBulkDelete();
     const canViewClient = window.nocAuth && window.nocAuth.canViewClient ? window.nocAuth.canViewClient() : false;
     const canViewNocType = window.nocAuth && window.nocAuth.canViewNocType ? window.nocAuth.canViewNocType() : false;
@@ -811,8 +814,8 @@ class UIManager {
             <button class="btn btn-sm btn-outline-primary" data-action="view" data-id="${rec.id}">
               👁️ View
             </button>
-            ${(isDeveloper && status === 'expired' && docsCount > 0) ? `
-              <button class="btn btn-sm btn-delete-expired-pdf" data-action="delete-expired-pdf" data-id="${rec.id}" title="Permanently delete PDF file from Supabase SQL">
+            ${(canDeleteExpired && status === 'expired' && docsCount > 0) ? `
+              <button class="btn btn-sm btn-delete-expired-pdf" data-action="delete-expired-pdf" data-id="${rec.id}" title="Permanently delete PDF file from Local Database and Supabase SQL">
                 🗑️ Delete PDF
               </button>
             ` : ''}
@@ -1271,11 +1274,31 @@ class UIManager {
    * Open the NOC Details and Document Gallery Modal
    */
   async openDetailsModal(id) {
-    let record = await window.nocDB.getById(id);
-    if (!record && window.nocApp && Array.isArray(window.nocApp.allRecords)) {
-      record = window.nocApp.allRecords.find(r => String(r.id) === String(id) || String(r.nocNumber) === String(id));
+    if (!id && id !== 0) return;
+
+    // 1. Look up in memory first for instant 0ms response
+    let record = null;
+    if (window.nocApp && Array.isArray(window.nocApp.allRecords)) {
+      record = window.nocApp.allRecords.find(r => 
+        String(r.id) === String(id) || 
+        String(r.nocNumber) === String(id) ||
+        (r.noc_number && String(r.noc_number) === String(id))
+      ) || null;
     }
-    if (!record) return;
+
+    // 2. Fallback to database lookup if not in memory
+    if (!record && window.nocDB) {
+      try {
+        record = await window.nocDB.getById(id);
+      } catch (e) {
+        console.warn('Error fetching record in openDetailsModal:', e);
+      }
+    }
+
+    if (!record) {
+      this.showToast('Unable to find record details.', 'error');
+      return;
+    }
 
     const modal = document.getElementById('nocDetailsModal');
     const content = document.getElementById('nocDetailsContent');
@@ -1293,33 +1316,60 @@ class UIManager {
 
     let docs = Array.isArray(record.documents) ? [...record.documents] : [];
     
-    // Check if any document lacks dataUrl, attempt to resolve from local IndexedDB & cache
-    if (docs.some(d => !d.dataUrl)) {
-      const localRec = await window.nocDB._localGetById(id).catch(() => null);
-      if (localRec && Array.isArray(localRec.documents)) {
-        docs = docs.map(d => {
-          if (!d.dataUrl) {
-            const ld = localRec.documents.find(x => x.id === d.id || x.name === d.name);
-            if (ld && ld.dataUrl) return { ...d, dataUrl: ld.dataUrl };
+    // If in-memory record has no docs, check local IndexedDB or fetch single record from Supabase
+    if (docs.length === 0) {
+      try {
+        const localRec = await window.nocDB._localGetById(id).catch(() => null);
+        if (localRec && Array.isArray(localRec.documents) && localRec.documents.length > 0) {
+          docs = [...localRec.documents];
+          record.documents = docs;
+        }
+      } catch (e) {}
+
+      if (docs.length === 0 && window.nocDB && window.nocDB.isSupabaseActive && window.nocDB.isSupabaseActive()) {
+        try {
+          const freshRec = await window.nocDB.getById(id);
+          if (freshRec && Array.isArray(freshRec.documents) && freshRec.documents.length > 0) {
+            docs = [...freshRec.documents];
+            record.documents = docs;
           }
-          return d;
-        });
+        } catch (e) {}
       }
     }
 
-    // Resolve any remaining missing dataUrls from dedicated documents store
-    for (let i = 0; i < docs.length; i++) {
-      if (!docs[i].dataUrl && window.nocDB && window.nocDB.getDocumentData) {
-        const dData = await window.nocDB.getDocumentData(docs[i].id).catch(() => null) ||
-                      await window.nocDB.getDocumentData(docs[i].name).catch(() => null);
-        if (dData) {
-          docs[i].dataUrl = dData;
+    // Check if any document lacks dataUrl, attempt to resolve from local IndexedDB & cache
+    if (docs.some(d => !d.dataUrl)) {
+      try {
+        const localRec = await window.nocDB._localGetById(id).catch(() => null);
+        if (localRec && Array.isArray(localRec.documents)) {
+          docs = docs.map(d => {
+            if (!d.dataUrl) {
+              const ld = localRec.documents.find(x => x.id === d.id || x.name === d.name);
+              if (ld && ld.dataUrl) return { ...d, dataUrl: ld.dataUrl };
+            }
+            return d;
+          });
         }
+      } catch (e) {}
+    }
+
+    // Resolve any remaining missing dataUrls from dedicated documents store or memory cache
+    for (let i = 0; i < docs.length; i++) {
+      if (!docs[i].dataUrl && window.nocDB) {
+        try {
+          const dData = this._docMemoryCache?.get(String(docs[i].id)) ||
+                        this._docMemoryCache?.get(String(docs[i].name)) ||
+                        (window.nocDB.getDocumentData ? (await window.nocDB.getDocumentData(docs[i].id).catch(() => null) || await window.nocDB.getDocumentData(docs[i].name).catch(() => null)) : null);
+          if (dData) {
+            docs[i].dataUrl = dData;
+          }
+        } catch (e) {}
       }
     }
 
     const isAdmin = window.nocAuth.isAdmin();
     const isDeveloper = window.nocAuth && window.nocAuth.isDeveloper && window.nocAuth.isDeveloper();
+    const canDeleteExpired = window.nocAuth && window.nocAuth.canDeleteExpiredPdf ? window.nocAuth.canDeleteExpiredPdf() : isDeveloper;
     const canViewNocType = window.nocAuth && window.nocAuth.canViewNocType ? window.nocAuth.canViewNocType() : false;
 
     const hasDocs = docs && docs.length > 0;
@@ -1367,8 +1417,8 @@ class UIManager {
           Attached Documents &amp; Certificates
         </h4>
         <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
-          ${(hasDocs && isDeveloper && status === 'expired') ? `
-          <button type="button" class="btn btn-sm btn-delete-expired-pdf" id="btnDetailsDeleteExpiredPdf" title="Permanently delete attached PDF file from Supabase SQL">
+          ${(hasDocs && canDeleteExpired && status === 'expired') ? `
+          <button type="button" class="btn btn-sm btn-delete-expired-pdf" id="btnDetailsDeleteExpiredPdf" title="Permanently delete attached PDF file from Local Database and Supabase SQL">
             🗑️ Delete Expired PDF
           </button>
           ` : ''}
@@ -1395,8 +1445,8 @@ class UIManager {
                 <button class="btn btn-sm btn-primary" data-view-doc-idx="${idx}" title="Preview PDF / Document">
                   👁️ View PDF
                 </button>
-                ${(isDeveloper && status === 'expired') ? `
-                  <button class="btn btn-sm btn-outline-danger" data-delete-expired-doc-idx="${idx}" title="Delete this PDF file permanently from Supabase SQL" style="color:#DC2626; border-color:#FCA5A5;">
+                ${(canDeleteExpired && status === 'expired') ? `
+                  <button class="btn btn-sm btn-outline-danger" data-delete-expired-doc-idx="${idx}" title="Delete this PDF file permanently from Local DB and Supabase SQL" style="color:#DC2626; border-color:#FCA5A5;">
                     🗑️
                   </button>
                 ` : ''}
@@ -1579,13 +1629,13 @@ class UIManager {
   }
 
   /**
-   * Open Expired PDF Delete Confirmation Modal (Developer Role Only)
+   * Open Expired PDF Delete Confirmation Modal
    */
   async openDeleteExpiredPdfModal(id, docId = null) {
     if (!id && id !== 0) return;
 
-    if (!window.nocAuth || !window.nocAuth.isDeveloper()) {
-      this.showToast('Access restricted: Developer role required to delete PDF files.', 'error');
+    if (!window.nocAuth || !window.nocAuth.canDeleteExpiredPdf()) {
+      this.showToast('Access restricted: Developer / Admin role required to delete PDF files.', 'error');
       return;
     }
 
@@ -1633,7 +1683,7 @@ class UIManager {
           <div><strong>Target Document:</strong> <span style="font-family:monospace;">📄 ${this.escapeHTML(docName)}</span></div>
         </div>
         <div style="font-size:0.82rem; color:#B91C1C; background:#FEF2F2; padding:0.65rem 0.85rem; border-radius:6px; border:1px solid #FECACA; line-height:1.45;">
-          ⚠️ <strong>Permanent Supabase SQL Action:</strong> The PDF document will be permanently erased from the <strong>Supabase SQL noc_records table</strong> and local storage. The NOC permit details and record metadata will remain intact.
+          ⚠️ <strong>Permanent Deletion:</strong> The PDF document will be permanently deleted from both the <strong>Local Database</strong> and <strong>Supabase SQL noc_records table</strong>. The NOC record details will remain intact.
         </div>
       `;
     }
@@ -1654,47 +1704,54 @@ class UIManager {
   }
 
   /**
-   * Open Bulk Delete Expired PDFs Modal (Developer Role Only)
+   * Open Bulk Delete Expired PDFs Modal (Developer / Admin Role)
    */
   openBulkDeleteExpiredPdfsModal(targetRecordIds = null) {
-    if (!window.nocAuth || !window.nocAuth.isDeveloper()) {
-      this.showToast('Access restricted: Developer role required to purge expired PDFs.', 'error');
+    if (!window.nocAuth || !window.nocAuth.canDeleteExpiredPdf()) {
+      this.showToast('Access restricted: Developer / Admin role required to purge expired PDFs.', 'error');
       return;
     }
 
     const allRecords = window.nocApp && Array.isArray(window.nocApp.allRecords) ? window.nocApp.allRecords : [];
-    const expiredWithDocs = allRecords.filter(r => {
-      const isExp = window.nocDB.getStatus(r.dateOfExpiration) === 'expired';
-      const hasDocs = Array.isArray(r.documents) && r.documents.length > 0;
-      if (!isExp || !hasDocs) return false;
+    const expiredRecords = allRecords.filter(r => {
+      const expDate = r.dateOfExpiration || r.date_of_expiration;
+      const isExp = window.nocDB.getStatus(expDate) === 'expired';
+      if (!isExp) return false;
       if (targetRecordIds && Array.isArray(targetRecordIds) && targetRecordIds.length > 0) {
-        const set = new Set(targetRecordIds.map(i => String(i)));
-        return set.has(String(r.id)) || (r.nocNumber && set.has(String(r.nocNumber)));
+        const set = new Set(targetRecordIds.map(i => String(i).trim()));
+        return set.has(String(r.id).trim()) || (r.nocNumber && set.has(String(r.nocNumber).trim())) || (r.noc_number && set.has(String(r.noc_number).trim()));
       }
       return true;
     });
 
-    if (expiredWithDocs.length === 0) {
-      this.showToast('No expired NOC records with attached PDF documents found.', 'info');
+    if (expiredRecords.length === 0) {
+      if (targetRecordIds && targetRecordIds.length > 0) {
+        this.showToast('None of the selected records have status "EXPIRED".', 'info');
+      } else {
+        this.showToast('No expired NOC records found in database.', 'info');
+      }
       return;
     }
 
-    this.pendingBulkExpiredPdfRecordIds = expiredWithDocs.map(r => r.id);
+    this.pendingBulkExpiredPdfRecordIds = expiredRecords.map(r => r.id);
 
     const modal = document.getElementById('bulkDeletePdfConfirmModal');
     const msgEl = document.getElementById('bulkDeletePdfConfirmMessage');
     const listEl = document.getElementById('bulkDeletePdfRecordList');
     const countEl = document.getElementById('bulkDeletePdfBtnCount');
 
-    if (countEl) countEl.textContent = expiredWithDocs.length;
+    if (countEl) countEl.textContent = expiredRecords.length;
     if (msgEl) {
-      msgEl.innerHTML = `Are you sure you want to permanently delete the attached PDF files for all <strong>${expiredWithDocs.length}</strong> expired NOC record${expiredWithDocs.length === 1 ? '' : 's'} from <strong>Supabase SQL</strong>?`;
+      msgEl.innerHTML = `Are you sure you want to permanently delete the attached PDF files for all <strong>${expiredRecords.length}</strong> expired NOC record${expiredRecords.length === 1 ? '' : 's'} from <strong>Local Database</strong> and <strong>Supabase SQL</strong>?<br><br><span style="color:#059669; font-weight:600;">✓ Note: NOC records (numbers, contractors, dates, description) will remain permanently in the database. Only the PDF documents are removed.</span>`;
     }
 
     if (listEl) {
-      listEl.innerHTML = expiredWithDocs.map((r, i) => {
-        const docNames = (r.documents || []).map(d => d.name).join(', ');
-        return `<div style="padding:0.25rem 0;">${i + 1}. <strong>${this.escapeHTML(r.nocNumber)}</strong> &bull; ${(r.issuedTo || '').toUpperCase()} &bull; <span style="color:#DC2626;">Expired: ${this.formatDate(r.dateOfExpiration)}</span><br><span style="color:var(--text-muted); font-size:0.75rem; padding-left:1rem;">📄 ${this.escapeHTML(docNames)}</span></div>`;
+      listEl.innerHTML = expiredRecords.map((r, i) => {
+        const docCount = (r.documents && r.documents.length > 0) ? r.documents.length : 0;
+        const docNames = docCount > 0
+          ? r.documents.map(d => d.name || 'PDF Document').join(', ')
+          : 'Attached PDF file(s)';
+        return `<div style="padding:0.35rem 0;">${i + 1}. <strong>${this.escapeHTML(r.nocNumber || r.noc_number || 'NOC')}</strong> &bull; ${(r.issuedTo || r.issued_to || '').toUpperCase()} &bull; <span style="color:#DC2626; font-weight:600;">Expired: ${this.formatDate(r.dateOfExpiration || r.date_of_expiration)}</span><br><span style="color:var(--text-muted); font-size:0.75rem; padding-left:1rem;">📄 ${this.escapeHTML(docNames)}</span></div>`;
       }).join('<hr style="border:0; border-top:1px dashed #E2E8F0; margin:0.35rem 0;">');
     }
 

@@ -276,7 +276,7 @@ class AuthManager {
   }
 
   canDeleteExpiredPdf() {
-    return this.isDeveloper();
+    return Boolean(this.isAdmin() || this.isDeveloper());
   }
 
   canBulkDelete() {

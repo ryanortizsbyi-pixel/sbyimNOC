@@ -132,8 +132,8 @@ class DocumentViewer {
           isExpRecord = true;
         }
       }
-      const isDev = window.nocAuth && window.nocAuth.isDeveloper && window.nocAuth.isDeveloper();
-      deleteBtn.style.display = (isDev && isExpRecord) ? 'inline-flex' : 'none';
+      const canDeletePdf = window.nocAuth && (window.nocAuth.canDeleteExpiredPdf ? window.nocAuth.canDeleteExpiredPdf() : window.nocAuth.isDeveloper());
+      deleteBtn.style.display = (canDeletePdf && isExpRecord) ? 'inline-flex' : 'none';
       deleteBtn.onclick = () => {
         const currentDoc = this.currentDocs[this.currentIndex];
         this.close();

@@ -109,7 +109,7 @@
             <button class="btn btn-outline" id="btnExportJSON" title="Download complete JSON backup" style="display: none;">
               💾 Backup JSON
             </button>
-            <button class="btn btn-outline btn-delete-expired-pdf" id="btnDeleteExpiredPdfs" title="Delete PDF files permanently from all Expired NOC records in Supabase SQL (Developer Only)" style="display: none;">
+            <button class="btn btn-outline btn-delete-expired-pdf" id="btnDeleteExpiredPdfs" title="Bulk delete PDF files permanently from all Expired NOC records in Local Database and Supabase SQL" style="display: none;">
               🗑️ Delete Expired PDFs
             </button>
             <button class="btn btn-outline" id="btnImportJSON" title="Load / Restore JSON database backup file" style="display: none;">
@@ -258,6 +258,9 @@
         <div class="bulk-actions-buttons">
           <button type="button" class="btn btn-sm btn-outline" id="btnSelectAllTotal" title="Select all records across all pages">Select All Records</button>
           <button type="button" class="btn btn-sm btn-outline" id="btnDeselectAll">Deselect All</button>
+          <button type="button" class="btn btn-sm btn-outline btn-delete-expired-pdf" id="btnBulkDeleteSelectedExpiredPdfs" title="Delete PDF files permanently from selected Expired records only">
+            <span>🗑️</span> <span>Delete Expired PDFs</span>
+          </button>
           <button type="button" class="btn btn-sm btn-danger" id="btnTriggerBulkDelete" style="background:#DC2626; color:#fff; font-weight:700; display:inline-flex; align-items:center; gap:0.4rem;">
             <span>🗑️</span> <span>Bulk Delete Selected</span>
           </button>
@@ -566,12 +569,12 @@
     </div>
   </div>
 
-  <!-- 3.3 Developer Bulk Expired PDF Purge Confirmation Modal -->
+  <!-- 3.3 Bulk Expired PDF Delete Confirmation Modal -->
   <div class="modal-overlay" id="bulkDeletePdfConfirmModal">
     <div class="modal-container small">
       <div class="modal-header">
         <h3 class="modal-title" style="color:#DC2626; display:flex; align-items:center; gap:0.5rem;">
-          <span>🗑️</span> <span>Purge Expired NOC PDF Files</span>
+          <span>🗑️</span> <span>Bulk Delete Expired PDF Files</span>
         </h3>
         <button class="modal-close" id="btnCloseBulkDeletePdfModal">&times;</button>
       </div>
@@ -582,11 +585,14 @@
         <div id="bulkDeletePdfRecordList" style="max-height:160px; overflow-y:auto; background:var(--bg-subtle, #F8FAFC); border:1px solid var(--border-light, #E2E8F0); border-radius:6px; padding:0.6rem; font-size:0.85rem; font-family:monospace; line-height:1.6; color:var(--text-main);">
           <!-- Dynamic summary list -->
         </div>
+        <div style="font-size:0.82rem; color:#B91C1C; background:#FEF2F2; padding:0.65rem 0.85rem; border-radius:6px; border:1px solid #FECACA; line-height:1.45; margin-top:0.75rem;">
+          ⚠️ <strong>Permanent Deletion:</strong> The attached PDF files will be permanently erased from both the <strong>Local Database</strong> and <strong>Supabase SQL noc_records table</strong>. The NOC records themselves will remain in the database.
+        </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline" id="btnCancelBulkDeletePdf">Cancel</button>
         <button type="button" class="btn btn-danger" id="btnConfirmBulkDeletePdf" style="background:#DC2626; color:#fff; font-weight:700;">
-          🗑️ Purge Expired PDFs (<span id="bulkDeletePdfBtnCount">0</span>)
+          🗑️ Delete Expired PDFs (<span id="bulkDeletePdfBtnCount">0</span>)
         </button>
       </div>
     </div>
