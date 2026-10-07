@@ -291,7 +291,7 @@ class AuthManager {
   }
 
   canDeleteExpiredPdf() {
-    return Boolean(this.isAdmin() || this.isDeveloper());
+    return this.isDeveloper();
   }
 
   canBulkDelete() {
@@ -390,8 +390,7 @@ class AuthManager {
   }
 
   canManageUsers() {
-    if (this.isSBYIM()) return false;
-    return Boolean(this.isAdminUser() || this.isDeveloper() || this.isAdmin()); // Admin and Developer can see and manage User Database
+    return this.isDeveloper(); // Strictly Developer access role only
   }
 
   canAccessAiAssistant() {

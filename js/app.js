@@ -883,7 +883,7 @@ class NOCApp {
     if (btnConfirmDeletePdf) {
       btnConfirmDeletePdf.addEventListener('click', async () => {
         if (!window.nocAuth || !window.nocAuth.canDeleteExpiredPdf()) {
-          window.showToast('Access restricted: Developer / Admin role required to delete PDF files.', 'error');
+          window.showToast('Access restricted: Developer role required to delete PDF files.', 'error');
           return;
         }
 
@@ -934,7 +934,7 @@ class NOCApp {
       });
     }
 
-    // Confirm Bulk Expired PDF Purge Button (Developer / Admin Role)
+    // Confirm Bulk Expired PDF Purge Button (Developer Role)
     const btnCloseBulkDeletePdfModal = document.getElementById('btnCloseBulkDeletePdfModal');
     const btnCancelBulkDeletePdf = document.getElementById('btnCancelBulkDeletePdf');
     if (btnCloseBulkDeletePdfModal) btnCloseBulkDeletePdfModal.addEventListener('click', () => window.nocUI.closeBulkDeleteExpiredPdfsModal());
@@ -951,7 +951,7 @@ class NOCApp {
     if (btnConfirmBulkDeletePdf) {
       btnConfirmBulkDeletePdf.addEventListener('click', async () => {
         if (!window.nocAuth || !window.nocAuth.canDeleteExpiredPdf()) {
-          window.showToast('Access restricted: Developer / Admin role required to purge expired PDFs.', 'error');
+          window.showToast('Access restricted: Developer role required to purge expired PDFs.', 'error');
           return;
         }
 
@@ -1093,7 +1093,7 @@ class NOCApp {
     if (btnBulkDeleteSelectedExpiredPdfs) {
       btnBulkDeleteSelectedExpiredPdfs.addEventListener('click', () => {
         if (!window.nocAuth || !window.nocAuth.canDeleteExpiredPdf()) {
-          window.showToast('Access restricted: Developer / Admin role required to delete expired PDF files.', 'error');
+          window.showToast('Access restricted: Developer role required to delete expired PDF files.', 'error');
           return;
         }
         const selectedIds = (window.nocUI && window.nocUI.selectedRecordIds && window.nocUI.selectedRecordIds.size > 0)
@@ -2056,7 +2056,7 @@ class NOCApp {
     if (btnDeleteExpiredPdfs) {
       btnDeleteExpiredPdfs.addEventListener('click', () => {
         if (!window.nocAuth || !window.nocAuth.canDeleteExpiredPdf()) {
-          window.showToast('Access restricted: Developer / Admin role required to delete expired PDF files.', 'error');
+          window.showToast('Access restricted: Developer role required to delete expired PDF files.', 'error');
           return;
         }
         const selectedIds = (window.nocUI && window.nocUI.selectedRecordIds && window.nocUI.selectedRecordIds.size > 0)
@@ -2361,7 +2361,7 @@ class NOCApp {
   }
 
   /**
-   * Set up User Database event listeners (Admin Only)
+   * Set up User Database event listeners (Developer Only)
    */
   setupUserDatabaseListeners() {
     const btnUserDatabase = document.getElementById('btnUserDatabase');
@@ -2378,6 +2378,10 @@ class NOCApp {
     // 1. Open User Database Modal
     if (btnUserDatabase) {
       btnUserDatabase.addEventListener('click', () => {
+        if (!window.nocAuth || !window.nocAuth.canManageUsers()) {
+          window.showToast('Access Denied: Only Developer accounts can access the User Database.', 'error');
+          return;
+        }
         window.nocUI.openUserDatabaseModal();
       });
     }

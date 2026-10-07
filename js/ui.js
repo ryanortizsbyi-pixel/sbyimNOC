@@ -391,6 +391,12 @@ class UIManager {
       btnDeleteExpiredPdfs.disabled = !canDeleteExpiredPdf;
     }
 
+    const btnBulkDeleteSelectedExpiredPdfs = document.getElementById('btnBulkDeleteSelectedExpiredPdfs');
+    if (btnBulkDeleteSelectedExpiredPdfs) {
+      btnBulkDeleteSelectedExpiredPdfs.style.display = canDeleteExpiredPdf ? 'inline-flex' : 'none';
+      btnBulkDeleteSelectedExpiredPdfs.disabled = !canDeleteExpiredPdf;
+    }
+
     const btnUserDatabase = document.getElementById('btnUserDatabase');
     const canManageUsers = window.nocAuth && window.nocAuth.canManageUsers();
     if (btnUserDatabase) {
@@ -1619,7 +1625,7 @@ class UIManager {
     if (!id && id !== 0) return;
 
     if (!window.nocAuth || !window.nocAuth.canDeleteExpiredPdf()) {
-      this.showToast('Access restricted: Developer / Admin role required to delete PDF files.', 'error');
+      this.showToast('Access restricted: Developer role required to delete PDF files.', 'error');
       return;
     }
 
@@ -1688,11 +1694,11 @@ class UIManager {
   }
 
   /**
-   * Open Bulk Delete Expired PDFs Modal (Developer / Admin Role)
+   * Open Bulk Delete Expired PDFs Modal (Developer Role)
    */
   openBulkDeleteExpiredPdfsModal(targetRecordIds = null) {
     if (!window.nocAuth || !window.nocAuth.canDeleteExpiredPdf()) {
-      this.showToast('Access restricted: Developer / Admin role required to purge expired PDFs.', 'error');
+      this.showToast('Access restricted: Developer role required to purge expired PDFs.', 'error');
       return;
     }
 
@@ -1761,8 +1767,15 @@ class UIManager {
     const countEl = document.getElementById('bulkSelectedCount');
     const textEl = document.getElementById('bulkSelectedText');
     const canBulkDelete = window.nocAuth && window.nocAuth.canBulkDelete && window.nocAuth.canBulkDelete();
+    const canDeleteExpiredPdf = window.nocAuth && window.nocAuth.canDeleteExpiredPdf && window.nocAuth.canDeleteExpiredPdf();
 
     if (!bar) return;
+
+    const btnBulkDeleteSelectedExpiredPdfs = document.getElementById('btnBulkDeleteSelectedExpiredPdfs');
+    if (btnBulkDeleteSelectedExpiredPdfs) {
+      btnBulkDeleteSelectedExpiredPdfs.style.display = canDeleteExpiredPdf ? 'inline-flex' : 'none';
+      btnBulkDeleteSelectedExpiredPdfs.disabled = !canDeleteExpiredPdf;
+    }
 
     if (canBulkDelete && this.selectedRecordIds && this.selectedRecordIds.size > 0) {
       const count = this.selectedRecordIds.size;
@@ -2696,15 +2709,15 @@ SET password = EXCLUDED.password,
   }
 
   // ==========================================================================
-  // USER DATABASE MANAGEMENT UI (Admin Only)
+  // USER DATABASE MANAGEMENT UI (Developer Only)
   // ==========================================================================
 
   /**
-   * Open the User Database Management Modal (Admin Only)
+   * Open the User Database Management Modal (Developer Only)
    */
   async openUserDatabaseModal() {
     if (!window.nocAuth || !window.nocAuth.canManageUsers()) {
-      this.showToast('Access Denied: Only Administrator accounts can access the User Database.', 'error');
+      this.showToast('Access Denied: Only Developer accounts can access the User Database.', 'error');
       return;
     }
 
