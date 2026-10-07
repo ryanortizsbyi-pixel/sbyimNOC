@@ -324,27 +324,27 @@ button, input, select, textarea {
 }
 
 .btn-user-db {
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 0.45rem !important;
-  padding: 0.4rem 0.85rem !important;
-  border-radius: var(--radius-full) !important;
-  font-size: 0.82rem !important;
-  font-weight: 600 !important;
-  background: var(--bg-surface) !important;
-  border: 1px solid var(--border-light) !important;
-  color: var(--text-main) !important;
-  box-shadow: var(--shadow-xs) !important;
-  cursor: pointer !important;
-  transition: all var(--transition-fast) !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: var(--radius-full);
+  font-size: 0.82rem;
+  font-weight: 600;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-light);
+  color: var(--text-main);
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  transition: all var(--transition-fast);
 }
 
 .btn-user-db:hover:not(:disabled) {
-  background: var(--bg-subtle) !important;
-  border-color: var(--primary-blue) !important;
-  color: var(--primary-blue) !important;
-  transform: translateY(-1px) !important;
-  box-shadow: var(--shadow-sm) !important;
+  background: var(--bg-subtle);
+  border-color: var(--primary-blue);
+  color: var(--primary-blue);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
 }
 
 .db-status-dot {
