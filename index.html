@@ -394,11 +394,12 @@
               <input type="text" id="dateExpirationInput" class="form-input flatpickr-custom-input" placeholder="e.g. 31 Aug 2026" autocomplete="off">
             </div>
 
-            <div class="form-group">
+            <div class="form-group col-span-2">
               <label class="form-label" for="issuedToSelect">
                 <span>Issued To (Contractor / Company) <span class="required">*</span></span>
                 <div style="display:flex; gap:0.4rem; align-items:center;">
                   <button type="button" class="type-hint-btn" id="issuedToEditHint" title="Edit selected Contractor / Company">Edit Company</button>
+                  <button type="button" class="type-hint-btn type-hint-btn-danger" id="issuedToDeleteHint" title="Permanently delete selected Contractor / Company from dropdown menu">Delete Company</button>
                   <button type="button" class="type-hint-btn" id="issuedToHint" title="Add a new custom Contractor / Company">+ Add Company</button>
                 </div>
               </label>
@@ -427,6 +428,20 @@
                   <span>💡</span> <span>Updates this company name in the dropdown and all associated records.</span>
                 </div>
               </div>
+              <div class="custom-type-container danger-container" id="deleteContractorContainer" style="display:none; margin-top:0.45rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+                  <div style="font-size:0.85rem; color:#991B1B;">
+                    Permanently delete <strong id="deleteContractorNameSpan" style="color:#7F1D1D; text-transform:uppercase;"></strong> from dropdown?
+                  </div>
+                  <div style="display:flex; gap:0.45rem; align-items:center;">
+                    <button type="button" class="btn btn-sm btn-danger" id="btnConfirmDeleteContractor" style="background:#DC2626; color:#fff; padding:0.5rem 0.85rem; white-space:nowrap; font-weight:600;">Delete</button>
+                    <button type="button" class="btn btn-sm btn-outline" id="btnCancelDeleteContractor" style="padding:0.5rem 0.75rem; white-space:nowrap;">Cancel</button>
+                  </div>
+                </div>
+                <div style="font-size:0.75rem; color:#B91C1C; margin-top:0.35rem; display:flex; align-items:center; gap:0.3rem;">
+                  <span>⚠️</span> <span>Permanently removes this company name from the dropdown list.</span>
+                </div>
+              </div>
             </div>
 
             <div class="form-group" id="companyCodeFormGroup">
@@ -436,7 +451,7 @@
               <input type="text" id="companyCodeInput" class="form-input" placeholder="###RYAN" autocomplete="off">
             </div>
 
-            <div class="form-group col-span-2" id="clientFormGroup">
+            <div class="form-group" id="clientFormGroup">
               <label class="form-label" for="clientInput">
                 Client (Owner / Authority) <span class="required">*</span>
               </label>
