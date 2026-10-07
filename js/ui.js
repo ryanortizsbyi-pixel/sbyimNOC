@@ -307,7 +307,7 @@ class UIManager {
     const isDeveloper = window.nocAuth && window.nocAuth.isDeveloper && window.nocAuth.isDeveloper();
 
     if (statsGrid) {
-      statsGrid.style.display = 'grid';
+      statsGrid.style.display = isLoggedIn ? 'grid' : 'none';
     }
 
     document.body.classList.toggle('unauthenticated', !isLoggedIn);
@@ -327,7 +327,7 @@ class UIManager {
 
     const controlsCard = document.querySelector('.controls-card');
     if (controlsCard) {
-      controlsCard.style.display = 'block';
+      controlsCard.style.display = isLoggedIn ? 'block' : 'none';
     }
 
     if (filterStatus) {
@@ -575,10 +575,20 @@ class UIManager {
     const gridContainer = document.getElementById('gridViewContainer');
     const emptyState = document.getElementById('emptyStateContainer');
     const guestPrompt = document.getElementById('guestPromptContainer');
+    const paginationContainer = document.getElementById('paginationContainer');
+    const isLoggedIn = window.nocAuth && window.nocAuth.isLoggedIn();
+
+    if (!isLoggedIn) {
+      if (guestPrompt) guestPrompt.style.display = 'block';
+      if (tableContainer) tableContainer.style.display = 'none';
+      if (gridContainer) gridContainer.style.display = 'none';
+      if (emptyState) emptyState.style.display = 'none';
+      if (paginationContainer) paginationContainer.style.display = 'none';
+      return;
+    }
 
     if (guestPrompt) guestPrompt.style.display = 'none';
 
-    const paginationContainer = document.getElementById('paginationContainer');
     if (!records || records.length === 0) {
       if (tableContainer) tableContainer.style.display = 'none';
       if (gridContainer) gridContainer.style.display = 'none';
@@ -824,7 +834,8 @@ class UIManager {
     const controlsEl = document.getElementById('paginationControls');
     if (!container || !infoEl || !controlsEl) return;
 
-    if (totalRecords === 0) {
+    const isLoggedIn = window.nocAuth && window.nocAuth.isLoggedIn();
+    if (!isLoggedIn || totalRecords === 0) {
       container.style.display = 'none';
       return;
     }

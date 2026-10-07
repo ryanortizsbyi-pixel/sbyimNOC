@@ -21,7 +21,7 @@
   <!-- Flatpickr Modern Date Picker -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 </head>
-<body>
+<body class="unauthenticated">
 
   <!-- Top Sticky Navigation Bar -->
   <header class="navbar">
@@ -94,23 +94,14 @@
         </div>
         <div class="hero-actions-container">
           <div class="hero-actions">
-            <button class="btn btn-outline btn-user-db" id="btnUserDatabase" title="User Database - Manage portal users and credentials (Admin Only)" style="display: none;">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:0.25rem;">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                <circle cx="9" cy="7" r="4"></circle>
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-              </svg>
-              User Database
+            <button class="btn btn-outline btn-delete-expired-pdf" id="btnDeleteExpiredPdfs" title="Bulk delete PDF files permanently from all Expired NOC records in Local Database and Supabase SQL" style="display: none;">
+              🗑️ Delete Expired PDFs
             </button>
             <button class="btn btn-outline" id="btnExportCSV" title="Export database to CSV spreadsheet" style="display: none;">
               📊 Export CSV
             </button>
             <button class="btn btn-outline" id="btnExportJSON" title="Download complete JSON backup" style="display: none;">
               💾 Backup JSON
-            </button>
-            <button class="btn btn-outline btn-delete-expired-pdf" id="btnDeleteExpiredPdfs" title="Bulk delete PDF files permanently from all Expired NOC records in Local Database and Supabase SQL" style="display: none;">
-              🗑️ Delete Expired PDFs
             </button>
             <button class="btn btn-outline" id="btnImportJSON" title="Load / Restore JSON database backup file" style="display: none;">
               📥 Load JSON
@@ -121,7 +112,16 @@
             </button>
           </div>
           <div class="hero-sub-actions">
-            <!-- Supabase Database Status Badge (Positioned below User Database) -->
+            <!-- User Database & Supabase Database Status Badge -->
+            <button class="btn btn-outline btn-user-db" id="btnUserDatabase" title="User Database - Manage portal users and credentials (Admin Only)" style="display: none;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:0.25rem;">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+              </svg>
+              User Database
+            </button>
             <button class="db-status-badge" id="btnDatabaseConfig" title="Click to manage Supabase PostgreSQL database connection & schema" style="display:none;">
               <span class="db-status-dot" id="dbStatusDot"></span>
               <span id="dbStatusText">Supabase: Connected</span>
@@ -320,13 +320,14 @@
       <p class="empty-text">No records match your search criteria or the database is currently empty.</p>
     </section>
 
-    <!-- Guest Search Initial Prompt -->
-    <section class="empty-state" id="guestPromptContainer" style="display:block;">
-      <div class="empty-icon" style="background:var(--secondary-blue-light); color:var(--secondary-blue);">🔍</div>
+    <!-- Landing Welcome Prompt (Unauthenticated View) -->
+    <section class="empty-state" id="guestPromptContainer">
+      <div class="empty-icon">🔍</div>
       <h3 class="empty-title">Welcome to SBYIM NOC Portal</h3>
       <p class="empty-text">Please sign in to access, search, and view certificate compliance records.</p>
-      <button type="button" class="btn btn-primary" id="btnGuestPromptLogin" style="margin-top:1rem; padding:0.6rem 1.5rem; font-weight:700; border-radius:9999px; box-shadow:0 4px 14px rgba(13, 148, 136, 0.25);" onclick="if(window.nocUI&&window.nocUI.openLoginModal)window.nocUI.openLoginModal(true)">
-        🛡️ Sign In to Access Portal
+      <button type="button" class="btn btn-primary" id="btnGuestPromptLogin" onclick="if(window.nocUI&&window.nocUI.openLoginModal)window.nocUI.openLoginModal(true)">
+        <span>🛡️</span>
+        <span>Sign In to Access Portal</span>
       </button>
     </section>
 
