@@ -462,7 +462,7 @@ class NOCDatabase {
       console.log('⚡ [Supabase] Fetching all records directly from public.noc_records (Single Source of Truth)...');
       const { data, error } = await client
         .from('noc_records')
-        .select('*')
+        .select('id, noc_number, noc_type, client, issued_to, company_code, date_of_issuance, date_of_expiration, description, created_at, updated_at')
         .order('created_at', { ascending: false });
 
       if (error) {

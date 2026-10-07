@@ -824,10 +824,7 @@ class UIManager {
     const controlsEl = document.getElementById('paginationControls');
     if (!container || !infoEl || !controlsEl) return;
 
-    const isLoggedIn = window.nocAuth && window.nocAuth.isLoggedIn();
-    const isGuest = window.nocAuth && window.nocAuth.isGuest();
-
-    if (!isLoggedIn || isGuest || totalRecords === 0) {
+    if (totalRecords === 0) {
       container.style.display = 'none';
       return;
     }

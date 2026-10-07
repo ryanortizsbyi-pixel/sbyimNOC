@@ -96,20 +96,42 @@ class NOCApp {
    */
   async loadNocRecords() {
     try {
-      const client = window.supabaseManager ? window.supabaseManager.getClient() : null;
+      // Wait briefly for Supabase SDK script if still loading
+      if (!window.supabase || typeof window.supabase.createClient !== 'function') {
+        for (let i = 0; i < 20; i++) {
+          if (window.supabase && typeof window.supabase.createClient === 'function') break;
+          await new Promise(r => setTimeout(r, 100));
+        }
+      }
+
+      if (window.supabaseManager && !window.supabaseManager.getClient()) {
+        window.supabaseManager.initClient();
+      }
+
+      const client = (window.supabaseManager && window.supabaseManager.getClient()) ||
+        (window.supabase && typeof window.supabase.createClient === 'function'
+          ? window.supabase.createClient('https://skidfzyisurdkzsmcpwe.supabase.co', 'sb_publishable_IKBla9qx0bETi1Fs4GJG5g_8fikmi3q')
+          : null);
+
       if (!client) {
-        console.error('Supabase fetch error: Supabase client is not initialized.');
+        console.error('FAILED TO LOAD NOC RECORDS: Supabase client is not initialized or SDK failed to load.');
         return [];
       }
 
       console.log('⚡ [Supabase] Fetching all records directly from public.noc_records (Single Source of Truth)...');
       const { data, error } = await client
         .from('noc_records')
-        .select('*')
+        .select('id, noc_number, noc_type, client, issued_to, company_code, date_of_issuance, date_of_expiration, description, created_at, updated_at')
         .order('created_at', { ascending: false });
 
+      console.log('NOC Supabase response:', {
+        count: data ? data.length : 0,
+        error: error,
+        data: data
+      });
+
       if (error) {
-        console.error('Supabase fetch error:', error);
+        console.error('FAILED TO LOAD NOC RECORDS:', error);
         return [];
       }
 
@@ -125,6 +147,7 @@ class NOCApp {
       }
 
       this.allRecords = records;
+      console.log('Loaded records from Supabase:', this.allRecords.length);
 
       // Update dashboard statistics: Total NOC Records, Active Permits, Expiring Soon, Expired Permits
       if (window.nocDB && window.nocUI) {
@@ -136,10 +159,9 @@ class NOCApp {
       this.applyFilters();
       this.populateTypeFilterOptions();
 
-      console.log(`✅ [Supabase] Successfully loaded ${records.length} records into NOC Portal.`);
       return records;
     } catch (err) {
-      console.error('Supabase fetch error:', err);
+      console.error('FAILED TO LOAD NOC RECORDS:', err);
       return [];
     }
   }
@@ -3293,8 +3315,16 @@ window.loadNocRecords = async function() {
   return [];
 };
 
-// Bootstrap application once DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-  window.nocApp = new NOCApp();
-  window.nocApp.init();
-});
+// Bootstrap application once DOM is ready (or immediately if already loaded)
+function bootstrapNocApp() {
+  if (!window.nocApp) {
+    window.nocApp = new NOCApp();
+    window.nocApp.init();
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootstrapNocApp);
+} else {
+  bootstrapNocApp();
+}

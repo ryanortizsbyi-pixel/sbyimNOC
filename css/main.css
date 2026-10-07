@@ -770,17 +770,7 @@ body.role-employee .card-footer {
   display: none !important;
 }
 
-body.unauthenticated .stats-grid,
-body.unauthenticated .controls-card,
-body.unauthenticated .filters-group,
-body.unauthenticated .search-box,
 body.unauthenticated .bulk-actions-bar,
-body.unauthenticated #tableViewContainer,
-body.unauthenticated #gridViewContainer,
-body.unauthenticated .table-container,
-body.unauthenticated .grid-container,
-body.unauthenticated #paginationContainer,
-body.unauthenticated #emptyStateContainer,
 body.unauthenticated #btnNewNoc,
 body.unauthenticated #btnDatabaseConfig,
 body.unauthenticated #btnAiDocuments,
@@ -794,7 +784,7 @@ body.unauthenticated #heroUserDisplay {
 }
 
 body.unauthenticated #guestPromptContainer {
-  display: block !important;
+  display: none !important;
 }
 
 .controls-wrapper {
