@@ -1298,23 +1298,11 @@ class UIManager {
       }
     }
 
-    if (docs.length === 0) {
-      docs = [
-        {
-          id: 'doc_' + record.id + '_cert',
-          name: `${record.nocNumber}_Official_NOC.pdf`,
-          type: 'application/pdf',
-          size: 154200,
-          isSeedPlaceholder: true,
-          uploadedAt: record.createdAt || new Date().toISOString(),
-          uploadedBy: 'SBYI Management'
-        }
-      ];
-    }
-
     const isAdmin = window.nocAuth.isAdmin();
     const isDeveloper = window.nocAuth && window.nocAuth.isDeveloper && window.nocAuth.isDeveloper();
     const canViewNocType = window.nocAuth && window.nocAuth.canViewNocType ? window.nocAuth.canViewNocType() : false;
+
+    const hasDocs = docs && docs.length > 0;
 
     content.innerHTML = `
       <div class="details-grid">
@@ -1358,11 +1346,14 @@ class UIManager {
         <h4 style="font-size:1rem; font-weight:700; color:var(--text-main); margin:0;">
           Attached Documents &amp; Certificates
         </h4>
+        ${hasDocs ? `
         <button type="button" class="btn btn-sm btn-primary" id="btnQuickOpenPdf" style="font-weight:600; padding:0.4rem 0.9rem; border-radius:6px; box-shadow:0 2px 8px rgba(13, 148, 136, 0.2);">
           📄 View PDF Certificate
         </button>
+        ` : ''}
       </div>
 
+      ${hasDocs ? `
       <div class="doc-gallery">
         ${docs.map((doc, idx) => {
           const isPDF = doc.type === 'application/pdf' || doc.name.toLowerCase().endsWith('.pdf');
@@ -1387,6 +1378,12 @@ class UIManager {
           `;
         }).join('')}
       </div>
+      ` : `
+      <div style="background:var(--bg-subtle, #f8fafc); border:1px dashed var(--border-color, #cbd5e1); border-radius:8px; padding:1.25rem; text-align:center; color:var(--text-muted); margin-top:0.25rem;">
+        <span style="font-size:1.5rem; display:block; margin-bottom:0.35rem;">📄</span>
+        <span style="font-weight:500; font-size:0.875rem;">No PDF document attached to this NOC record.</span>
+      </div>
+      `}
     `;
 
     // Bind Quick Open PDF button

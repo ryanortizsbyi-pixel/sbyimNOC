@@ -2587,19 +2587,10 @@ class NOCApp {
       return;
     }
 
-    // 8. Validate PDF Document Upload (Required - 1 PDF file)
+    // 8. Optional PDF Document Upload (Max 1 PDF file)
     let docs = (window.nocUI && window.nocUI.pendingUploadFiles && window.nocUI.pendingUploadFiles.length > 0)
       ? [...window.nocUI.pendingUploadFiles]
       : [];
-
-    if (docs.length === 0) {
-      window.showToast('Upload NOC Certificate / Document (PDF Only) is required. Please attach 1 PDF document.', 'error');
-      if (dropzone) {
-        dropzone.classList.add('dropzone-error');
-        dropzone.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-      return;
-    }
 
     const companyCode = (document.getElementById('companyCodeInput')?.value || '').trim();
 
