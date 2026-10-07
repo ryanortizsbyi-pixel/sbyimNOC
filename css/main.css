@@ -1687,6 +1687,17 @@ body.unauthenticated .user-role-badge {
   text-decoration: underline;
 }
 
+.type-hint-btn.type-hint-btn-danger,
+.type-hint-btn-danger {
+  color: #DC2626;
+}
+
+.type-hint-btn.type-hint-btn-danger:hover,
+.type-hint-btn-danger:hover {
+  background: #FEE2E2;
+  color: #B91C1C;
+}
+
 .noc-type-select-wrapper,
 .contractor-select-wrapper {
   position: relative;
@@ -1708,6 +1719,11 @@ body.unauthenticated .user-role-badge {
   border-radius: var(--radius-md);
   padding: 0.65rem 0.75rem;
   animation: slideDownFade 0.2s ease-out;
+}
+
+.custom-type-container.danger-container {
+  background: #FEF2F2;
+  border-color: #FECACA;
 }
 
 @keyframes slideDownFade {
