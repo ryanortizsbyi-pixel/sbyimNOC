@@ -37,6 +37,16 @@ class NOCApp {
       } catch (err) {
         console.warn('Database init note:', err);
       }
+
+      if (window.nocDB) {
+        Promise.all([
+          window.nocDB.getCustomContractors ? window.nocDB.getCustomContractors() : Promise.resolve([]),
+          window.nocDB.getContractorRenames ? window.nocDB.getContractorRenames() : Promise.resolve({}),
+          window.nocDB.getDeletedContractors ? window.nocDB.getDeletedContractors() : Promise.resolve([])
+        ]).then(() => {
+          this.populateFormContractorOptions('');
+        }).catch(() => {});
+      }
     }
 
     // 4. Set default sort and initial search query for active user
@@ -494,6 +504,17 @@ class NOCApp {
       console.warn('Could not read custom contractors from localStorage', e);
     }
 
+    let deletedContractors = new Set();
+    try {
+      const storedDeleted = localStorage.getItem('noc_deleted_contractors');
+      if (storedDeleted) {
+        const parsed = JSON.parse(storedDeleted);
+        if (Array.isArray(parsed)) parsed.forEach(c => deletedContractors.add(String(c).trim().toUpperCase()));
+      }
+    } catch (e) {
+      console.warn('Could not read deleted contractors from localStorage', e);
+    }
+
     let renames = {};
     try {
       const storedRenames = localStorage.getItem('noc_contractor_renames');
@@ -510,7 +531,7 @@ class NOCApp {
     const unique = [];
     for (const c of combined) {
       const upper = String(c).trim().toUpperCase();
-      if (!upper) continue;
+      if (!upper || deletedContractors.has(upper)) continue;
       if (!seen.has(upper)) {
         seen.add(upper);
         unique.push(upper);
@@ -566,6 +587,23 @@ class NOCApp {
   }
 
   /**
+   * Delete Contractor / Company name permanently across DB, localStorage, and dropdown
+   */
+  async deleteContractor(contractorName) {
+    if (!contractorName) return;
+    const upper = String(contractorName).trim().toUpperCase();
+    if (!upper) return;
+
+    // 1. Delete in DB / localStorage / Supabase
+    if (window.nocDB && typeof window.nocDB.deleteCustomContractor === 'function') {
+      await window.nocDB.deleteCustomContractor(upper);
+    }
+
+    // 2. Repopulate modal dropdown
+    this.populateFormContractorOptions('');
+  }
+
+  /**
    * Populate Create/Edit modal form Issued To (Contractor/Company) dropdown
    */
   populateFormContractorOptions(selectedContractor = '') {
@@ -574,6 +612,8 @@ class NOCApp {
 
     const customContainer = document.getElementById('customContractorContainer');
     const customInput = document.getElementById('issuedToCustomInput');
+    const editContainer = document.getElementById('editContractorContainer');
+    const deleteContainer = document.getElementById('deleteContractorContainer');
 
     const contractors = this.getAvailableContractors();
     select.innerHTML = '<option value="" disabled selected>-- Select Contractor / Company --</option>';
@@ -626,6 +666,8 @@ class NOCApp {
         customInput.required = false;
       }
     }
+    if (editContainer) editContainer.style.display = 'none';
+    if (deleteContainer) deleteContainer.style.display = 'none';
   }
 
   /**
@@ -1216,7 +1258,7 @@ class NOCApp {
       });
     }
 
-    // Issued To (Contractor / Company) Select & Custom/Edit Contractor Input interactions
+    // Issued To (Contractor / Company) Select & Custom/Edit/Delete Contractor interactions
     const issuedToSelect = document.getElementById('issuedToSelect');
     const customContractorContainer = document.getElementById('customContractorContainer');
     const issuedToCustomInput = document.getElementById('issuedToCustomInput');
@@ -1227,10 +1269,16 @@ class NOCApp {
     const issuedToEditInput = document.getElementById('issuedToEditInput');
     const btnSaveEditContractor = document.getElementById('btnSaveEditContractor');
     const btnCancelEditContractor = document.getElementById('btnCancelEditContractor');
+    const issuedToDeleteHint = document.getElementById('issuedToDeleteHint');
+    const deleteContractorContainer = document.getElementById('deleteContractorContainer');
+    const deleteContractorNameSpan = document.getElementById('deleteContractorNameSpan');
+    const btnConfirmDeleteContractor = document.getElementById('btnConfirmDeleteContractor');
+    const btnCancelDeleteContractor = document.getElementById('btnCancelDeleteContractor');
 
     if (issuedToSelect) {
       issuedToSelect.addEventListener('change', (e) => {
         if (editContractorContainer) editContractorContainer.style.display = 'none';
+        if (deleteContractorContainer) deleteContractorContainer.style.display = 'none';
         if (issuedToEditInput) {
           issuedToEditInput.value = '';
           issuedToEditInput.dataset.originalValue = '';
@@ -1255,6 +1303,7 @@ class NOCApp {
     if (issuedToHint) {
       issuedToHint.addEventListener('click', () => {
         if (editContractorContainer) editContractorContainer.style.display = 'none';
+        if (deleteContractorContainer) deleteContractorContainer.style.display = 'none';
         if (issuedToEditInput) {
           issuedToEditInput.value = '';
           issuedToEditInput.dataset.originalValue = '';
@@ -1297,6 +1346,7 @@ class NOCApp {
         }
 
         if (customContractorContainer) customContractorContainer.style.display = 'none';
+        if (deleteContractorContainer) deleteContractorContainer.style.display = 'none';
         if (issuedToCustomInput) {
           issuedToCustomInput.required = false;
           issuedToCustomInput.value = '';
@@ -1367,6 +1417,60 @@ class NOCApp {
           issuedToEditInput.value = '';
           issuedToEditInput.dataset.originalValue = '';
         }
+      });
+    }
+
+    if (issuedToDeleteHint) {
+      issuedToDeleteHint.addEventListener('click', () => {
+        const currentVal = issuedToSelect ? issuedToSelect.value.trim() : '';
+        if (!currentVal || currentVal === '__custom__') {
+          if (window.showToast) {
+            window.showToast('Please select a Contractor / Company from the dropdown to delete.', 'info');
+          }
+          return;
+        }
+
+        if (customContractorContainer) customContractorContainer.style.display = 'none';
+        if (editContractorContainer) editContractorContainer.style.display = 'none';
+        if (issuedToCustomInput) {
+          issuedToCustomInput.required = false;
+          issuedToCustomInput.value = '';
+        }
+
+        if (deleteContractorNameSpan) deleteContractorNameSpan.textContent = `"${currentVal}"`;
+        if (deleteContractorContainer) deleteContractorContainer.style.display = 'block';
+      });
+    }
+
+    if (btnConfirmDeleteContractor) {
+      btnConfirmDeleteContractor.addEventListener('click', async () => {
+        const targetCompany = issuedToSelect ? issuedToSelect.value.trim().toUpperCase() : '';
+        if (!targetCompany || targetCompany === '__custom__') {
+          if (deleteContractorContainer) deleteContractorContainer.style.display = 'none';
+          return;
+        }
+
+        btnConfirmDeleteContractor.disabled = true;
+        try {
+          await window.nocApp.deleteContractor(targetCompany);
+          if (deleteContractorContainer) deleteContractorContainer.style.display = 'none';
+          if (issuedToSelect) issuedToSelect.value = '';
+          if (window.showToast) {
+            window.showToast(`Company "${targetCompany}" has been permanently deleted from the dropdown menu.`, 'success');
+          }
+        } catch (err) {
+          if (window.showToast) {
+            window.showToast('Failed to delete company: ' + err.message, 'error');
+          }
+        } finally {
+          btnConfirmDeleteContractor.disabled = false;
+        }
+      });
+    }
+
+    if (btnCancelDeleteContractor) {
+      btnCancelDeleteContractor.addEventListener('click', () => {
+        if (deleteContractorContainer) deleteContractorContainer.style.display = 'none';
       });
     }
 

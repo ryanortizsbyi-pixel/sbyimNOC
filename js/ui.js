@@ -322,7 +322,7 @@ class UIManager {
       companyCodeGroup.style.display = canViewCompanyCode ? '' : 'none';
     }
     if (clientGroup) {
-      clientGroup.classList.toggle('col-span-2', canViewCompanyCode);
+      clientGroup.classList.toggle('col-span-2', !canViewCompanyCode);
     }
 
     const controlsCard = document.querySelector('.controls-card');
@@ -509,6 +509,7 @@ class UIManager {
     const customContractorContainer = document.getElementById('customContractorContainer');
     const customContractorInput = document.getElementById('issuedToCustomInput');
     const editContractorContainer = document.getElementById('editContractorContainer');
+    const deleteContractorContainer = document.getElementById('deleteContractorContainer');
     const issuedToEditInput = document.getElementById('issuedToEditInput');
     const issuedToSelect = document.getElementById('issuedToSelect');
     if (customContractorContainer) customContractorContainer.style.display = 'none';
@@ -517,6 +518,7 @@ class UIManager {
       customContractorInput.required = false;
     }
     if (editContractorContainer) editContractorContainer.style.display = 'none';
+    if (deleteContractorContainer) deleteContractorContainer.style.display = 'none';
     if (issuedToEditInput) {
       issuedToEditInput.value = '';
       issuedToEditInput.dataset.originalValue = '';
@@ -972,6 +974,7 @@ class UIManager {
     const customContractorContainer = document.getElementById('customContractorContainer');
     const customContractorInput = document.getElementById('issuedToCustomInput');
     const editContractorContainer = document.getElementById('editContractorContainer');
+    const deleteContractorContainer = document.getElementById('deleteContractorContainer');
     const issuedToEditInput = document.getElementById('issuedToEditInput');
     if (customContractorContainer) customContractorContainer.style.display = 'none';
     if (customContractorInput) {
@@ -979,6 +982,7 @@ class UIManager {
       customContractorInput.required = false;
     }
     if (editContractorContainer) editContractorContainer.style.display = 'none';
+    if (deleteContractorContainer) deleteContractorContainer.style.display = 'none';
     if (issuedToEditInput) {
       issuedToEditInput.value = '';
       issuedToEditInput.dataset.originalValue = '';
@@ -993,7 +997,7 @@ class UIManager {
       companyCodeGroup.style.display = canViewCompanyCode ? '' : 'none';
     }
     if (clientGroup) {
-      clientGroup.classList.toggle('col-span-2', canViewCompanyCode);
+      clientGroup.classList.toggle('col-span-2', !canViewCompanyCode);
     }
 
     this.initDatePickers();
@@ -1140,6 +1144,7 @@ class UIManager {
     const customContractorContainer = document.getElementById('customContractorContainer');
     const customContractorInput = document.getElementById('issuedToCustomInput');
     const editContractorContainer = document.getElementById('editContractorContainer');
+    const deleteContractorContainer = document.getElementById('deleteContractorContainer');
     const issuedToEditInput = document.getElementById('issuedToEditInput');
     const issuedToSelect = document.getElementById('issuedToSelect');
     if (customContractorContainer) customContractorContainer.style.display = 'none';
@@ -1148,6 +1153,7 @@ class UIManager {
       customContractorInput.required = false;
     }
     if (editContractorContainer) editContractorContainer.style.display = 'none';
+    if (deleteContractorContainer) deleteContractorContainer.style.display = 'none';
     if (issuedToEditInput) {
       issuedToEditInput.value = '';
       issuedToEditInput.dataset.originalValue = '';

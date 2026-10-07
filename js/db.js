@@ -2110,6 +2110,125 @@ class NOCDatabase {
   }
 
   /**
+   * Permanently delete a Contractor / Company from the dropdown menu and database
+   */
+  async deleteCustomContractor(contractorName) {
+    if (!contractorName) return;
+    const trimmed = String(contractorName).trim().toUpperCase();
+    if (!trimmed) return;
+
+    // 1. Remove from Supabase custom contractors table
+    if (this.isSupabaseActive()) {
+      try {
+        const client = this.getSupabaseClient();
+        await client
+          .from('noc_custom_contractors')
+          .delete()
+          .eq('name', trimmed);
+      } catch (err) {
+        console.warn('Supabase delete contractor note:', err.message);
+      }
+    }
+
+    // 2. Remove from localStorage custom contractors
+    try {
+      let customContractors = await this.getCustomContractors();
+      customContractors = customContractors.filter(c => c.toUpperCase() !== trimmed);
+      localStorage.setItem('noc_custom_contractors', JSON.stringify(customContractors));
+    } catch (e) {
+      console.warn('Could not update custom contractors in localStorage', e);
+    }
+
+    // 3. Remove from contractor renames
+    try {
+      const storedRenames = localStorage.getItem('noc_contractor_renames');
+      let renames = storedRenames ? JSON.parse(storedRenames) : {};
+      let renamesChanged = false;
+      if (renames[trimmed]) {
+        delete renames[trimmed];
+        renamesChanged = true;
+      }
+      for (const k of Object.keys(renames)) {
+        if (renames[k] && renames[k].toUpperCase() === trimmed) {
+          delete renames[k];
+          renamesChanged = true;
+        }
+      }
+      if (renamesChanged) {
+        localStorage.setItem('noc_contractor_renames', JSON.stringify(renames));
+        if (this.isSupabaseActive()) {
+          try {
+            const client = this.getSupabaseClient();
+            await client.from('noc_settings').upsert({
+              key: 'noc_contractor_renames',
+              value: renames,
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'key' });
+          } catch (e) {}
+        }
+      }
+    } catch (e) {}
+
+    // 4. Add to deleted contractors blacklist (persisted in localStorage and Supabase noc_settings)
+    try {
+      let deletedList = await this.getDeletedContractors();
+      if (!deletedList.includes(trimmed)) {
+        deletedList.push(trimmed);
+        localStorage.setItem('noc_deleted_contractors', JSON.stringify(deletedList));
+      }
+
+      if (this.isSupabaseActive()) {
+        try {
+          const client = this.getSupabaseClient();
+          await client.from('noc_settings').upsert({
+            key: 'noc_deleted_contractors',
+            value: deletedList,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'key' });
+        } catch (e) {
+          console.warn('Supabase deleted contractors sync note:', e);
+        }
+      }
+    } catch (e) {
+      console.warn('Could not save deleted contractors to localStorage', e);
+    }
+  }
+
+  /**
+   * Retrieve all deleted contractors list (from Supabase or localStorage)
+   */
+  async getDeletedContractors() {
+    if (this.isSupabaseActive()) {
+      try {
+        const client = this.getSupabaseClient();
+        const { data, error } = await client
+          .from('noc_settings')
+          .select('value')
+          .eq('key', 'noc_deleted_contractors')
+          .maybeSingle();
+
+        if (!error && data && Array.isArray(data.value)) {
+          try {
+            localStorage.setItem('noc_deleted_contractors', JSON.stringify(data.value));
+          } catch (e) {}
+          return data.value.map(c => String(c).trim().toUpperCase());
+        }
+      } catch (e) {
+        console.warn('Supabase getDeletedContractors failed, reading local:', e.message);
+      }
+    }
+
+    try {
+      const stored = localStorage.getItem('noc_deleted_contractors');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) return parsed.map(c => String(c).trim().toUpperCase());
+      }
+    } catch (e) {}
+    return [];
+  }
+
+  /**
    * Retrieve all saved contractor rename mappings (from Supabase or localStorage)
    */
   async getContractorRenames() {
@@ -2456,6 +2575,7 @@ class NOCDatabase {
     const localContractors = await this.getCustomContractors();
     const localUsers = await this.getUsers();
     const localRenames = await this.getContractorRenames();
+    const localDeleted = await this.getDeletedContractors();
 
     const stats = {
       recordsSynced: 0,
@@ -2596,7 +2716,8 @@ class NOCDatabase {
       const settingsPayload = [
         { key: 'noc_contractor_renames', value: localRenames },
         { key: 'noc_custom_types', value: localTypes },
-        { key: 'noc_custom_contractors', value: localContractors }
+        { key: 'noc_custom_contractors', value: localContractors },
+        { key: 'noc_deleted_contractors', value: localDeleted }
       ];
       const { error: settingsError } = await client
         .from('noc_settings')
