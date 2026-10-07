@@ -241,12 +241,12 @@ async function restoreAllData(forceRestore = false) {
     }
 
     // 2. Restore NOC Records if forceRestore is true and INITIAL_NOC_SEED_DATA is populated
-    let localRecords = await window.nocDB._localGetAll();
+    let records = (window.nocDB && typeof window.nocDB.getAll === 'function') ? await window.nocDB.getAll() : [];
     if (forceRestore && INITIAL_NOC_SEED_DATA && INITIAL_NOC_SEED_DATA.length > 0) {
       await window.nocDB.bulkInsert(INITIAL_NOC_SEED_DATA);
-      localRecords = await window.nocDB._localGetAll();
+      records = await window.nocDB.getAll();
     }
-    stats.records = localRecords ? localRecords.length : 0;
+    stats.records = records ? records.length : 0;
 
     // 3. Restore Requirements Documents
     const reqDocs = await window.nocDB.getRequirementsDocs();

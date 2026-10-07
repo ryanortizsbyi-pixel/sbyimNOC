@@ -120,6 +120,7 @@ class SupabaseConfigManager {
             detectSessionInUrl: false
           }
         });
+        window.supabaseClient = this.client;
         console.log('⚡ Supabase client initialized with URL:', url);
         return this.client;
       } catch (err) {

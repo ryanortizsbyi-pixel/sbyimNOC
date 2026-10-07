@@ -152,19 +152,7 @@ class NOCDatabase {
       localStorage.removeItem('noc_records');
     } catch (e) {}
 
-    // 3. Delete from Supabase if connected (only once per client session to prevent startup egress)
-    const CLOUD_PURGE_KEY = 'noc_records_purged_cloud_v7';
-    if (this.isSupabaseActive() && !localStorage.getItem(CLOUD_PURGE_KEY)) {
-      try {
-        console.log('[Supabase] Running one-time legacy demo data purge');
-        const client = this.getSupabaseClient();
-        await client.from('noc_records').delete().in('id', demoIds);
-        await client.from('noc_records').delete().in('noc_number', demoNocNumbers);
-        localStorage.setItem(CLOUD_PURGE_KEY, 'true');
-      } catch (e) {
-        console.warn('Supabase demo data purge note:', e);
-      }
-    }
+    // 3. Keep existing cloud NOC records intact (Supabase is single source of truth - do not delete records)
 
     // 4. Purge legacy demo NOC requirement documents from localStorage, IndexedDB and Supabase
     const demoReqIds = ['req_doc_01', 'req_doc_02', 'req_doc_03', 'req_doc_04', 'req_doc_05'];
@@ -464,57 +452,52 @@ class NOCDatabase {
    * When Supabase is connected, records are queried directly from Supabase.
    */
   async getAll() {
-    if (this.isSupabaseActive()) {
-      try {
-        console.log('[Supabase] Fetching NOC records with documents metadata');
-        const client = this.getSupabaseClient();
-        const { data, error } = await client
-          .from('noc_records')
-          .select('id, noc_number, noc_type, client, issued_to, company_code, date_of_issuance, date_of_expiration, description, documents, created_at, updated_at')
-          .order('created_at', { ascending: false })
-          .limit(5000);
+    const client = this.getSupabaseClient() || (window.supabaseManager ? window.supabaseManager.getClient() : null);
+    if (!client) {
+      console.error('Supabase fetch error: Supabase client is not available.');
+      return [];
+    }
 
-        if (error) throw error;
+    try {
+      console.log('⚡ [Supabase] Fetching all records directly from public.noc_records (Single Source of Truth)...');
+      const { data, error } = await client
+        .from('noc_records')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-        // When Supabase query succeeds, Supabase data IS the single source of truth
-        if (data && Array.isArray(data)) {
-          const cloudRecords = data.map(row => this.mapDbToRecord(row));
+      if (error) {
+        console.error('Supabase fetch error:', error);
+        return [];
+      }
 
-          // Resolve attached document dataUrls from memory cache or document store
-          for (const r of cloudRecords) {
-            if (r && Array.isArray(r.documents)) {
-              for (const d of r.documents) {
-                if (!d.dataUrl) {
-                  const dData = this._docMemoryCache.get(String(d.id)) || this._docMemoryCache.get(String(d.name));
-                  if (dData) d.dataUrl = dData;
-                } else {
-                  if (d.id) this._docMemoryCache.set(String(d.id), d.dataUrl);
-                  if (d.name) this._docMemoryCache.set(String(d.name), d.dataUrl);
-                }
+      // When Supabase query succeeds, Supabase data IS the single source of truth
+      if (data && Array.isArray(data)) {
+        const cloudRecords = data.map(row => this.mapDbToRecord(row));
+
+        // Resolve attached document dataUrls from memory cache or document store
+        for (const r of cloudRecords) {
+          if (r && Array.isArray(r.documents)) {
+            for (const d of r.documents) {
+              if (!d.dataUrl) {
+                const dData = this._docMemoryCache.get(String(d.id)) || this._docMemoryCache.get(String(d.name));
+                if (dData) d.dataUrl = dData;
+              } else {
+                if (d.id) this._docMemoryCache.set(String(d.id), d.dataUrl);
+                if (d.name) this._docMemoryCache.set(String(d.name), d.dataUrl);
               }
             }
           }
-
-          // Sync local IndexedDB cache store so offline fallback accurately mirrors Supabase (removing deleted records)
-          this._localSetStoreItems(LOCAL_STORE_NAME, cloudRecords).catch(() => {});
-
-          return cloudRecords;
         }
 
-        return [];
-      } catch (err) {
-        console.warn('Supabase getAll failed, falling back to local DB cache:', err.message);
+        console.log(`✅ [Supabase] Successfully fetched ${cloudRecords.length} records from public.noc_records`);
+        return cloudRecords;
       }
-    }
 
-    // Local IndexedDB Fallback (only when offline or Supabase not configured)
-    let localRecords = [];
-    try {
-      localRecords = await this._localGetAll();
-    } catch (e) {
-      console.warn('Error fetching local records in getAll:', e);
+      return [];
+    } catch (err) {
+      console.error('Supabase fetch error:', err);
+      return [];
     }
-    return localRecords || [];
   }
 
   /**

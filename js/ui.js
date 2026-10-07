@@ -307,7 +307,7 @@ class UIManager {
     const isDeveloper = window.nocAuth && window.nocAuth.isDeveloper && window.nocAuth.isDeveloper();
 
     if (statsGrid) {
-      statsGrid.style.display = (isAdmin || isSecurity) ? 'grid' : 'none';
+      statsGrid.style.display = 'grid';
     }
 
     document.body.classList.toggle('unauthenticated', !isLoggedIn);
@@ -327,29 +327,29 @@ class UIManager {
 
     const controlsCard = document.querySelector('.controls-card');
     if (controlsCard) {
-      controlsCard.style.display = !isLoggedIn ? 'none' : 'block';
+      controlsCard.style.display = 'block';
     }
 
     if (filterStatus) {
-      filterStatus.style.display = !isLoggedIn ? 'none' : 'inline-block';
+      filterStatus.style.display = 'inline-block';
     }
 
     if (filterNocType) {
-      filterNocType.style.display = !isLoggedIn ? 'none' : 'inline-block';
+      filterNocType.style.display = 'inline-block';
     }
 
     if (filterSort) {
-      filterSort.style.display = !isLoggedIn ? 'none' : 'inline-block';
+      filterSort.style.display = 'inline-block';
     }
 
     const filtersGroup = document.querySelector('.filters-group');
     if (filtersGroup) {
-      filtersGroup.style.display = !isLoggedIn ? 'none' : 'flex';
+      filtersGroup.style.display = 'flex';
     }
 
     const searchBox = document.querySelector('.search-box');
     if (searchBox) {
-      searchBox.style.display = (!isLoggedIn || isGuest) ? 'none' : '';
+      searchBox.style.display = '';
     }
 
     if (searchInput) {
@@ -439,8 +439,8 @@ class UIManager {
     const isMain = window.nocAuth && window.nocAuth.isMain();
     const currentUser = window.nocAuth && window.nocAuth.getUser();
     
-    // Only Guest role (1GDL) sets default search filter to username, Employees view all records
-    const guestSearchQuery = (isGuest && currentUser && currentUser.username) ? currentUser.username : '';
+    // Clear search query unless manually entered
+    const guestSearchQuery = '';
 
     let defaultSort = 'newest';
     if (isSBYIM || isSecurity || isGuest || isMain) {
@@ -449,16 +449,17 @@ class UIManager {
       defaultSort = 'newest';
     }
 
-    // 1. If role is Guest, automatically set search input to username to view corresponding data files
+    // 1. Reset search input and filters
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
-      searchInput.value = guestSearchQuery;
+      searchInput.value = '';
     }
     if (window.nocApp) {
-      window.nocApp.searchQuery = guestSearchQuery;
+      window.nocApp.searchQuery = '';
       window.nocApp.selectedStatus = 'all';
       window.nocApp.selectedType = 'all';
       window.nocApp.sortBy = defaultSort;
+      window.nocApp.currentPage = 1;
     }
 
     // 2. Reset filter dropdown values
@@ -541,15 +542,10 @@ class UIManager {
     window.addEventListener('noc:auth-change', () => {
       this.resetSessionState();
       this.updateUserBadge();
-      if (window.nocDB && typeof window.nocDB.getStatistics === 'function') {
-        window.nocDB.getStatistics().then(stats => {
-          if (stats) this.renderStats(stats);
-        }).catch(err => console.warn('Could not fetch stats on auth change:', err));
-      }
-      if (window.nocApp) {
+      if (window.nocApp && typeof window.nocApp.loadNocRecords === 'function') {
+        window.nocApp.loadNocRecords();
+      } else if (window.nocApp) {
         window.nocApp.applyFilters();
-      } else {
-        this.renderRecords(this.currentRecords);
       }
       this.showToast(`Active session: ${window.nocAuth.getUser().displayName} (${window.nocAuth.getUser().role.toUpperCase()})`, 'info');
     });
@@ -579,26 +575,6 @@ class UIManager {
     const gridContainer = document.getElementById('gridViewContainer');
     const emptyState = document.getElementById('emptyStateContainer');
     const guestPrompt = document.getElementById('guestPromptContainer');
-    const isLoggedIn = window.nocAuth && window.nocAuth.isLoggedIn();
-    const isGuest = window.nocAuth && window.nocAuth.isGuest();
-    const isMain = window.nocAuth && window.nocAuth.isMain();
-
-    // 1. If not logged in on first load, DO NOT show data records - show Guest Sign-in Prompt
-    if (!isLoggedIn) {
-      if (tableContainer) tableContainer.style.display = 'none';
-      if (gridContainer) gridContainer.style.display = 'none';
-      if (emptyState) emptyState.style.display = 'none';
-      const paginationContainer = document.getElementById('paginationContainer');
-      if (paginationContainer) paginationContainer.style.display = 'none';
-      if (guestPrompt) {
-        guestPrompt.style.display = 'block';
-        const titleEl = guestPrompt.querySelector('.empty-title');
-        const textEl = guestPrompt.querySelector('.empty-text');
-        if (titleEl) titleEl.textContent = 'Welcome to SBYIM NOC Portal';
-        if (textEl) textEl.textContent = 'Please sign in to access, search, and view certificate compliance records.';
-      }
-      return;
-    }
 
     if (guestPrompt) guestPrompt.style.display = 'none';
 

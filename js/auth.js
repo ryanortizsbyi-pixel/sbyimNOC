@@ -115,10 +115,25 @@ class AuthManager {
   }
 
   /**
-   * Load saved session - returns null so the landing screen is always the first screen seen upon loading index
+   * Load saved session if available
    */
   loadUser() {
-    // Always start unauthenticated upon loading the index so the welcome screen is the first screen seen
+    try {
+      const explicitLogout = sessionStorage.getItem('noc_explicit_logout');
+      if (explicitLogout === 'true') {
+        return null;
+      }
+      const sessionUser = sessionStorage.getItem(this.STORAGE_KEY);
+      if (sessionUser) {
+        const parsed = JSON.parse(sessionUser);
+        if (parsed && parsed.username) return parsed;
+      }
+      const storedUser = localStorage.getItem(this.STORAGE_KEY);
+      if (storedUser) {
+        const parsed = JSON.parse(storedUser);
+        if (parsed && parsed.username && parsed.rememberMe) return parsed;
+      }
+    } catch (e) {}
     return null;
   }
 

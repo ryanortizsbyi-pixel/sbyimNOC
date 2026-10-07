@@ -44,11 +44,8 @@ class NOCApp {
     const isSecurity = window.nocAuth && window.nocAuth.isSecurity();
     const isEmployee = window.nocAuth && (window.nocAuth.isEmployee ? window.nocAuth.isEmployee() : window.nocAuth.isMain());
     const isAdminUser = window.nocAuth && window.nocAuth.isAdminUser();
-    const currentUser = window.nocAuth && window.nocAuth.getUser();
 
-    const isGuest = window.nocAuth && window.nocAuth.isGuest();
-
-    if (isSBYIM || isSecurity || isEmployee || isGuest) {
+    if (isSBYIM || isSecurity || isEmployee) {
       this.sortBy = 'issuance';
       const filterSort = document.getElementById('filterSort');
       if (filterSort) filterSort.value = 'issuance';
@@ -58,13 +55,9 @@ class NOCApp {
       if (filterSort) filterSort.value = 'newest';
     }
 
-    if (isGuest && currentUser && currentUser.username) {
-      const searchInput = document.getElementById('searchInput');
-      if (searchInput) searchInput.value = currentUser.username;
-      this.searchQuery = currentUser.username;
-    } else {
-      this.searchQuery = '';
-    }
+    this.searchQuery = '';
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) searchInput.value = '';
 
     // 5. Seed initial realistic database if empty (run asynchronously without blocking)
     try {
@@ -73,11 +66,11 @@ class NOCApp {
       console.warn('Seed database note:', err);
     }
 
-    // 6. Load all records from active database (Supabase Cloud or Local fallback)
+    // 6. Load all records from active database (Supabase Cloud Single Source of Truth)
     try {
-      await this.refreshData();
+      await this.loadNocRecords();
     } catch (err) {
-      console.warn('Initial data refresh note:', err);
+      console.error('Initial data load note:', err);
     }
 
     // 7. Re-populate type filters and contractor dropdowns after data loaded
@@ -98,26 +91,64 @@ class NOCApp {
   }
 
   /**
-   * Fetch latest data from IndexedDB and re-render
+   * Main function to fetch all NOC records directly from public.noc_records
+   * Updates Total NOC Records, Active Permits, Expiring Soon, Expired Permits, and table/grid view
    */
-  async refreshData() {
+  async loadNocRecords() {
     try {
-      this.allRecords = await window.nocDB.getAll();
-      if (Array.isArray(this.allRecords)) {
-        this.allRecords.forEach(r => {
+      const client = window.supabaseManager ? window.supabaseManager.getClient() : null;
+      if (!client) {
+        console.error('Supabase fetch error: Supabase client is not initialized.');
+        return [];
+      }
+
+      console.log('⚡ [Supabase] Fetching all records directly from public.noc_records (Single Source of Truth)...');
+      const { data, error } = await client
+        .from('noc_records')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Supabase fetch error:', error);
+        return [];
+      }
+
+      const rawData = data || [];
+      const records = rawData.map(row => window.nocDB ? window.nocDB.mapDbToRecord(row) : row);
+
+      if (Array.isArray(records)) {
+        records.forEach(r => {
           if (r && r.issuedTo) {
             r.issuedTo = String(r.issuedTo).trim().toUpperCase();
           }
         });
       }
-      const stats = await window.nocDB.getStatistics();
-      window.nocUI.renderStats(stats);
+
+      this.allRecords = records;
+
+      // Update dashboard statistics: Total NOC Records, Active Permits, Expiring Soon, Expired Permits
+      if (window.nocDB && window.nocUI) {
+        const stats = await window.nocDB.getStatistics(this.allRecords);
+        window.nocUI.renderStats(stats);
+      }
+
+      // Update table / grid display with active filters and pagination
       this.applyFilters();
       this.populateTypeFilterOptions();
+
+      console.log(`✅ [Supabase] Successfully loaded ${records.length} records into NOC Portal.`);
+      return records;
     } catch (err) {
-      console.error('Error fetching data from database:', err);
-      window.showToast('Failed to load records from database.', 'error');
+      console.error('Supabase fetch error:', err);
+      return [];
     }
+  }
+
+  /**
+   * Fetch latest data from Supabase and re-render
+   */
+  async refreshData() {
+    return this.loadNocRecords();
   }
 
   /**
@@ -579,14 +610,7 @@ class NOCApp {
    * Filter and sort records based on search query and dropdown selections
    */
   applyFilters() {
-    const isLoggedIn = window.nocAuth && window.nocAuth.isLoggedIn();
-    if (!isLoggedIn) {
-      this.filteredRecords = [];
-      window.nocUI.renderRecords([]);
-      return;
-    }
-
-    const q = this.searchQuery.trim().toLowerCase();
+    const q = (this.searchQuery || '').trim().toLowerCase();
     const isGuest = window.nocAuth.isGuest();
 
     this.filteredRecords = this.allRecords.filter((rec) => {
@@ -3151,48 +3175,25 @@ trailer
    * - Re-renders active table / grid view with current filter criteria
    */
   async handleRealtimeEventSync({ eventType, newRecord, oldRecord, deletedId, payload }) {
-    if (!this.allRecords) this.allRecords = [];
+    console.log(`⚡ [Realtime Synchronizer] Reloading latest complete dataset from Supabase after ${eventType} event...`);
+    
+    // Call the main fetch function again so every browser reloads the latest complete dataset directly from Supabase
+    await this.loadNocRecords();
 
     const targetNoc = (newRecord && newRecord.nocNumber) || (oldRecord && oldRecord.noc_number) || '';
 
-    if (eventType === 'INSERT' && newRecord) {
-      const existingIdx = this.allRecords.findIndex(r => String(r.id) === String(newRecord.id) || (r.nocNumber && r.nocNumber.toLowerCase() === newRecord.nocNumber.toLowerCase()));
-      if (existingIdx >= 0) {
-        this.allRecords[existingIdx] = newRecord;
-      } else {
-        this.allRecords.unshift(newRecord);
-      }
+    if (eventType === 'INSERT') {
       window.showToast(`⚡ Realtime: New NOC ${targetNoc ? '"' + targetNoc + '"' : 'record'} created in Supabase. Dashboard updated.`, 'info');
-    } else if (eventType === 'UPDATE' && newRecord) {
-      const existingIdx = this.allRecords.findIndex(r => String(r.id) === String(newRecord.id) || (r.nocNumber && r.nocNumber.toLowerCase() === newRecord.nocNumber.toLowerCase()));
-      if (existingIdx >= 0) {
-        this.allRecords[existingIdx] = { ...this.allRecords[existingIdx], ...newRecord };
-      } else {
-        this.allRecords.unshift(newRecord);
-      }
+    } else if (eventType === 'UPDATE') {
       window.showToast(`⚡ Realtime: NOC ${targetNoc ? '"' + targetNoc + '"' : 'record'} updated in Supabase. Dashboard updated.`, 'info');
     } else if (eventType === 'DELETE') {
-      const delTarget = String(deletedId || (oldRecord && (oldRecord.id || oldRecord.noc_number)));
-      if (delTarget) {
-        this.allRecords = this.allRecords.filter(r => String(r.id) !== delTarget && String(r.nocNumber) !== delTarget);
-      }
       window.showToast(`⚡ Realtime: NOC ${targetNoc ? '"' + targetNoc + '"' : 'record'} removed from Supabase. Dashboard updated.`, 'info');
     }
 
-    // 2. Automatically recalculate & render Total NOC Records, Active Permits, Expiring Soon, and Expired Permits
-    const stats = await window.nocDB.getStatistics(this.allRecords);
-    if (window.nocUI && typeof window.nocUI.renderStats === 'function') {
-      window.nocUI.renderStats(stats);
+    // If user currently has a view/edit modal open for an affected record, synchronize modal state
+    if (payload) {
+      this.handleRealtimeModalSync(payload);
     }
-
-    // 3. Update dashboard table / grid view automatically with current filters and search
-    this.applyFilters();
-
-    // 4. Update dropdown categories and contractor options
-    this.populateTypeFilterOptions();
-
-    // 5. If user currently has a view/edit modal open for an affected record, synchronize modal state
-    this.handleRealtimeModalSync(payload);
   }
 
   /**
@@ -3283,6 +3284,13 @@ window.subscribeToNocRealtime = function(callback) {
     return window.nocDB.subscribeToRealtimeRecords(callback);
   }
   return () => {};
+};
+
+window.loadNocRecords = async function() {
+  if (window.nocApp && typeof window.nocApp.loadNocRecords === 'function') {
+    return window.nocApp.loadNocRecords();
+  }
+  return [];
 };
 
 // Bootstrap application once DOM is ready
